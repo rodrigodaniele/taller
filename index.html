@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>La Casa de la Dirección</title>
+    <style>
+        body { background-color: #000000; color: #ffffff; margin: 0; font-family: Arial, sans-serif; scroll-behavior: smooth; }
+        header { background-image: url("encabezado.jpg"); background-size: contain; background-position: center; background-repeat: no-repeat; background-color: #000000; height: 180px; }
+        .botonera { display: flex; justify-content: center; gap: 20px; padding: 30px 10px; flex-wrap: wrap; }
+        .btn { display: inline-block; padding: 14px 28px; font-family: 'Arial Black', sans-serif; font-size: 15px; text-transform: uppercase; text-decoration: none; border-radius: 4px; background-color: #000000; color: #ffffff; border: 3px solid #e31212; transition: all 0.3s ease; text-align: center; }
+        .btn:hover { background-color: #1a1a1a; cursor: pointer; }
+        
+        /* Estilos de la sección Quiénes Somos Panorámico */
+        .seccion-presentacion { display: flex; max-width: 1000px; margin: 30px auto; padding: 20px; gap: 30px; align-items: center; flex-wrap: wrap; }
+        .contenido-quienes { flex: 1.2; min-width: 300px; line-height: 1.6; }
+        .contenido-quienes h2 { font-family: 'Arial Black', sans-serif; color: #e31212; text-transform: uppercase; margin-top: 0; font-size: 26px; border-bottom: 3px solid #e31212; padding-bottom: 10px; margin-bottom: 15px; }
+        .contenido-quienes p { font-size: 16px; color: #ffffff; }
+        .galeria-imagenes { flex: 1; min-width: 300px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+        .galeria-imagenes img { width: 100%; height: 140px; object-fit: cover; border: 2px solid #e31212; border-radius: 6px; box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.6); }
+        
+        /* Tarjetas de servicios detallados */
+        .seccion-servicios-detalle { max-width: 1000px; margin: 40px auto; padding: 0 20px; }
+        .titulo-seccion-servicios { font-family: 'Arial Black', sans-serif; text-transform: uppercase; font-size: 24px; text-align: center; margin-bottom: 30px; }
+        .contenedor-tarjetas-servicios { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 25px; }
+        .tarjeta-servicio { background-color: #0d0d0d; border: 2px solid #e31212; border-radius: 6px; padding: 25px; box-shadow: 0px 5px 15px rgba(0, 0, 0, 0.5); }
+        .tarjeta-servicio h3 { font-family: 'Arial Black', sans-serif; color: #e31212; text-transform: uppercase; margin-top: 0; font-size: 19px; border-bottom: 1px solid #222; padding-bottom: 10px; margin-bottom: 15px; }
+        .tarjeta-servicio p { font-size: 14px; line-height: 1.5; color: #ccc; }
+        
+        /* Sección de Contacto final */
+        .seccion-contacto-final { background-color: #080808; border-top: 3px solid #e31212; margin-top: 60px; padding: 40px 20px 10px 20px; }
+        .contenedor-contacto-final { max-width: 1000px; margin: 0 auto; display: flex; justify-content: space-between; gap: 40px; flex-wrap: wrap; }
+        .bloque-info-final { flex: 1; min-width: 280px; }
+        .bloque-info-final h3 { font-family: 'Arial Black', sans-serif; color: #e31212; text-transform: uppercase; font-size: 18px; margin-top: 0; }
+        
+        /* Modales flotantes de ingreso */
+        .modal-fondo { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.85); display: flex; justify-content: center; align-items: center; z-index: 2000; }
+        .modal-caja { background-color: #000000; border: 3px solid #e31212; padding: 30px; border-radius: 8px; width: 90%; max-width: 400px; position: relative; }
+        .modal-caja h2 { font-family: 'Arial Black', sans-serif; color: #e31212; text-transform: uppercase; text-align: center; margin-top: 0; }
+        .btn-cerrar { position: absolute; top: 10px; right: 15px; font-size: 28px; color: #e31212; cursor: pointer; }
+        .modal-caja label { display: block; margin-top: 12px; font-weight: bold; font-size: 14px; }
+        .modal-caja input, .modal-caja select { width: 100%; padding: 10px; margin-top: 5px; background-color: #111; border: 1px solid #333; color: white; border-radius: 4px; box-sizing: border-box; }
+        .btn-enviar { width: 100%; background-color: #e31212; color: white; border: none; padding: 12px; font-weight: bold; text-transform: uppercase; margin-top: 20px; border-radius: 4px; cursor: pointer; font-family: 'Arial Black', sans-serif; }
+        .texto-registro { text-align: center; margin-top: 15px; font-size: 13px; color: #aaa; }
+        .texto-registro a { color: #e31212; text-decoration: none; font-weight: bold; }
+        
+        /* Contenedor del panel integrado */
+        #panel-usuario { display: none; padding: 30px 20px; max-width: 650px; margin: 20px auto; background-color: #111; border: 2px solid #e31212; border-radius: 8px; text-align: center; box-shadow: 0px 5px 15px rgba(0,0,0,0.5); }
+        @media (max-width: 480px) { .galeria-imagenes { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <header></header>
+
+        <div class="botonera">
+        <a href="https://wa.me/5492625532070/?text=Hola!%20Quiero%20consultar%20por%20un%20turno%20en%20La%20Casa%20de%20la%20Dirección" target="_blank" class="btn">Enviar WhatsApp</a>
+        <a href="#servicios-detalle" class="btn">Nuestros Servicios</a>
+        <a href="https://maps.app.goo.gl/dEzUXy5uZspWS7Tr8" target="_blank" class="btn">Cómo Llegar</a>
+        <a href="#modalIngreso" onclick="abrirFormulario(event)" class="btn">Ingresar</a>
+    </div>
+
+    <!-- PANEL DE USUARIO INTEGRADO DIRECTO EN LA WEB (DESLIZABLE) -->
+    <div id="panel-usuario">
+        <h2 style="font-family: 'Arial Black', sans-serif; color: #e31212; text-transform: uppercase;">¡Bienvenido a tu Panel!</h2>
+        <p>Hola, <span id="perfil-nombre" style="font-weight: bold;"></span></p>
+        <div style="background-color: #000; padding: 10px; border-radius: 4px; text-align: left; margin-bottom: 20px; border: 1px solid #333;">
+            <p style="margin:5px 0;"><strong>📱 Celular:</strong> <span id="perfil-telefono"></span></p>
+            <p style="margin:5px 0;"><strong>📧 Email:</strong> <span id="perfil-email"></span></p>
+        </div>
+        
+        <button onclick="abrirSelectorTurnos()" style="background-color: #e31212; color: white; border: none; padding: 12px; font-weight: bold; border-radius: 4px; cursor: pointer; text-transform: uppercase; font-family: 'Arial Black', sans-serif; margin-bottom: 20px; width: 100%;">📅 Solicitar Nuevo Turno</button>
+        
+        <!-- Tarjeta de reservar turno rediseñada -->
+        <div id="seccion-nuevo-turno" style="display: none; background-color: #000000; padding: 25px; border-radius: 8px; border: 2px solid #e31212; text-align: left; margin: 25px auto; max-width: 500px; box-shadow: 0px 4px 15px rgba(227, 18, 18, 0.15);">
+            <h3 style="color: #ffffff; text-transform: uppercase; font-family: 'Arial Black', sans-serif; text-align: center; margin-top: 0; margin-bottom: 20px; font-size: 16px; border-bottom: 1px solid #222; padding-bottom: 10px;">🗓️ Reservar Turno en el Taller</h3>
+            <div style="margin-bottom: 18px;">
+                <label style="display: block; font-weight: bold; font-size: 13px; text-transform: uppercase; color: #aaa; margin-bottom: 6px;">1. Patente del Vehículo:</label>
+                <input type="text" id="turno-nueva-patente" placeholder="Ej: AE123MZ o PEU534" style="width: 100%; padding: 12px; background-color: #111111; border: 1px solid #333333; color: #ffffff; border-radius: 4px; box-sizing: border-box; font-size: 15px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px;" required />
+            </div>
+            <div style="margin-bottom: 18px;">
+                <label style="display: block; font-weight: bold; font-size: 13px; text-transform: uppercase; color: #aaa; margin-bottom: 6px;">2. Elegí el Día:</label>
+                <input type="date" id="turno-nuevo-dia" onchange="cargarHorariosDisponibles()" style="width: 100%; padding: 12px; background-color: #111111; border: 1px solid #333333; color: #ffffff; border-radius: 4px; box-sizing: border-box; font-size: 15px;" required />
+            </div>
+            <div style="margin-bottom: 25px;">
+                <label style="display: block; font-weight: bold; font-size: 13px; text-transform: uppercase; color: #aaa; margin-bottom: 6px;">3. Horarios Disponibles:</label>
+                <select id="turno-nuevo-horario" style="width: 100%; padding: 12px; background-color: #111111; border: 1px solid #333333; color: #ffffff; border-radius: 4px; box-sizing: border-box; font-size: 15px; font-weight: bold;" required>
+                    <option value="">-- Seleccioná primero un día --</option>
+                </select>
+            </div>
+            <div style="display: flex; gap: 12px;">
+                <button onclick="guardarNuevoTurno()" style="background-color: #e31212; color: #ffffff; border: none; padding: 14px; font-weight: bold; text-transform: uppercase; font-family: 'Arial Black', sans-serif; border-radius: 4px; cursor: pointer; flex: 2; font-size: 14px;">Confirmar Reserva</button>
+                <button onclick="cancelarNuevoTurno()" style="background-color: #222222; color: #ffffff; border: 1px solid #444444; padding: 14px; font-weight: bold; text-transform: uppercase; font-family: 'Arial Black', sans-serif; border-radius: 4px; cursor: pointer; flex: 1; font-size: 14px;">Cancelar</button>
+            </div>
+        </div>
+
+        <h3 style="color: #fff; text-transform: uppercase; font-family: 'Arial Black', sans-serif; text-align: left; border-bottom: 2px solid #e31212;">🔧 Tus Turnos Programados</h3>
+        <div id="lista-programados" style="text-align: left; margin-bottom: 20px;"></div>
+        <h3 style="color: #666; text-transform: uppercase; font-family: 'Arial Black', sans-serif; text-align: left; border-bottom: 2px solid #333;">📋 Historial (Atendidos)</h3>
+        <div id="lista-atendidos" style="text-align: left; margin-bottom: 20px;"></div>
+        <button onclick="cerrarSesion()" style="background-color: transparent; color: #e31212; border: 2px solid #e31212; padding: 10px 20px; font-weight: bold; cursor: pointer; text-transform: uppercase;">Cerrar Sesión</button>
+    </div>
+
+        <!-- SECCIÓN CONTENEDOR QUIÉNES SOMOS PANORÁMICO -->
+    <div id="quienes-somos-bloque">
+        <div class="seccion-presentacion">
+            <div class="contenido-quienes">
+                <h2>Quiénes Somos</h2>
+                <p>En <strong>La Casa de la Dirección</strong> nos dedicamos de forma profesional al cuidado y mantenimiento de tu vehículo en General Alvear. Contamos con equipamiento de última tecnología para garantizar que tu auto ruede seguro.</p>
+            </div>
+            <div class="galeria-imagenes">
+                <img src="alineacion.jpg" alt="Alineación">
+                <img src="balanceo.jpg" alt="Balanceo">
+                <img src="trendelantero.jpg" alt="Tren Delantero">
+            </div>
+        </div>
+    </div>
+
+    <!-- SECCIÓN DETALLE DE SERVICIOS FIJOS ABAJO -->
+    <div id="servicios-detalle" class="seccion-servicios-detalle">
+        <h2 class="titulo-seccion-servicios">Nuestros Servicios Profesionales</h2>
+        <div class="contenedor-tarjetas-servicios">
+            <div class="tarjeta-servicio">
+                <h3>Alineación 3D</h3>
+                <p>Ajustamos los ángulos de las ruedas de forma milimétrica utilizando tecnología 3D de última generación.</p>
+            </div>
+            <div class="tarjeta-servicio">
+                <h3>Balanceo Digital</h3>
+                <p>Corregimos las irregularidades del peso en el conjunto mediante un diagnóstico computarizado de alta velocidad.</p>
+            </div>
+            <div class="tarjeta-servicio">
+                <h3>Tren Delantero</h3>
+                <p>Realizamos una revisión integral y reparación técnica de amortiguadores, rótulas, bujes y extremos.</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="seccion-contacto-final">
+        <div class="contenedor-contacto-final">
+            <div class="bloque-info-final">
+                <h3>⏱️ Horarios</h3>
+                <p><strong>Lunes a Viernes:</strong> 08:00 a 12:00 — 16:00 a 20:00 hs</p>
+                <p><strong>Sábados:</strong> 08:00 a 12:00 hs</p>
+            </div>
+            <div class="bloque-info-final">
+                <h3>📍 Ubicación</h3>
+                <p><strong>La Casa de la Dirección</strong> — General Alvear, Mendoza</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- FORMULARIO FLOTANTE DE INGRESO (LOGIN) -->
+    <div id="modalIngreso" class="modal-fondo" style="display: none;">
+        <div class="modal-caja">
+            <span class="btn-cerrar" onclick="cerrarFormulario()">&times;</span>
+            <div id="vista-login">
+                <h2>Iniciar Sesión</h2>
+                <form id="form-login" onsubmit="iniciarSesion(event)">
+                    <label for="usuario">Usuario o Email:</label>
+                    <input type="text" id="usuario" required />
+                    <label for="password">Contraseña:</label>
+                    <input type="password" id="password" required />
+                    <button type="submit" class="btn-enviar">Entrar</button>
+                </form>
+                <p class="texto-registro">¿No tenés cuenta? <a href="#" onclick="mostrarRegistro(event)">Registrate acá</a></p>
+            </div>
+            <div id="vista-registro" style="display: none;">
+                <h2>Crear Cuenta</h2>
+                <form id="form-registro" onsubmit="registrarUsuario(event)">
+                    <label for="reg-nombre">Nombre y Apellido:</label>
+                    <input type="text" id="reg-nombre" required />
+                    <label for="reg-telefono">Teléfono:</label>
+                    <input type="tel" id="reg-telefono" required />
+                    <label for="reg-email">Email:</label>
+                    <input type="email" id="reg-email" required />
+                    <label for="reg-email-confirmar">Confirmar Email:</label>
+                    <input type="email" id="reg-email-confirmar" required />
+                    <label for="reg-password">Contraseña:</label>
+                    <input type="password" id="reg-password" required />
+                    <label for="reg-password-confirmar">Confirmar Contraseña:</label>
+                    <input type="password" id="reg-password-confirmar" required />
+                    <button type="submit" class="btn-enviar">Registrarme</button>
+                </form>
+                <p class="texto-registro">¿Ya tenés cuenta? <a href="#" onclick="mostrarLogin(event)">Iniciá sesión acá</a></p>
+            </div>
+        </div>
+    </div>
+
+
+        <script>
+        const urlGoogleApp = "https://script.google.com/macros/s/AKfycbxsWl1Aauj1fcSXOO3DvsKSIW1kMQEw-8_uwdOjeFEJqHjquWWDzXPsI275i_pRlUmOCA/exec";
+        let emailGuardadoMemoria = "";
+        let passwordGuardadoMemoria = "";
+        function abrirFormulario(event) { if (event) event.preventDefault(); document.getElementById('modalIngreso').style.display = 'flex'; document.getElementById('vista-login').style.display = 'block'; document.getElementById('vista-registro').style.display = 'none'; }
+        function cerrarFormulario() { document.getElementById('modalIngreso').style.display = 'none'; }
+        function mostrarRegistro(e) { e.preventDefault(); document.getElementById('vista-login').style.display = 'none'; document.getElementById('vista-registro').style.display = 'block'; }
+        function mostrarLogin(e) { e.preventDefault(); document.getElementById('vista-registro').style.display = 'none'; document.getElementById('vista-login').style.display = 'block'; }
+
+function iniciarSesion(event) {
+    if (event && event.preventDefault) event.preventDefault();
+    
+    // Si los casilleros tienen texto (inicio por primera vez), los capturamos y guardamos en memoria
+    let email = document.getElementById('usuario').value;
+    let password = document.getElementById('password').value;
+
+    if (email && password) {
+        emailGuardadoMemoria = email;
+        passwordGuardadoMemoria = password;
+    } else {
+        // Si los casilleros están vacíos (actualización automática), usamos el recuerdo guardado
+        email = emailGuardadoMemoria;
+        password = passwordGuardadoMemoria;
+    }
+
+    fetch(urlGoogleApp, { method: 'POST', body: JSON.stringify({ accion: "login", email: email, password: password }) })
+    .then(res => res.json())
+    .then(data => {
+        if (data.resultado === "ok") {
+            document.getElementById('perfil-nombre').innerText = data.nombre;
+            document.getElementById('perfil-telefono').innerText = data.telefono;
+            document.getElementById('perfil-email').innerText = data.email;
+            
+            const cp = document.getElementById('lista-programados'); 
+            const ca = document.getElementById('lista-atendidos');
+            cp.innerHTML = ""; ca.innerHTML = ""; let tp = false; let ta = false;
+
+            if (data.turnos && data.turnos.length > 0) {
+                data.turnos.forEach(t => {
+                    let fLimpia = String(t.fecha).includes('T') ? String(t.fecha).split('T')[0] : String(t.fecha);
+                    let hLimpia = String(t.horario).includes('T') ? String(t.horario).split('T')[1].substring(0, 5) : String(t.horario);
+                    let diseño = `<div style="background-color: #1a1a1a; padding: 12px; border-radius: 6px; border-left: 5px solid ${t.estado.toLowerCase() === 'programado' ? '#e31212' : '#555'}; margin-top: 10px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #222;"><div><p style="margin:2px 0;">📅 ${fLimpia} — ⏰ ${hLimpia} hs — 🚗 Patente: <span style="color:#e31212; font-weight:bold; text-transform:uppercase;">${t.patente}</span></p></div><span style="font-size:11px; font-weight:bold; text-transform:uppercase; padding:4px 8px; border-radius:3px; background-color:${t.estado.toLowerCase() === 'programado' ? '#e31212' : '#333'};">${t.estado}</span></div>`;
+                    if (t.estado.toLowerCase() === "programado") { cp.innerHTML += diseño; tp = true; } else { ca.innerHTML += diseño; ta = true; }
+                });
+            }
+            if (!tp) cp.innerHTML = `<p style="color:#aaa; font-style:italic; font-size:14px;">No tenés turnos programados pendientes.</p>`;
+            if (!ta) ca.innerHTML = `<p style="color:#666; font-style:italic; font-size:14px;">Aún no registrás servicios atendidos.</p>`;
+            
+            cerrarFormulario();
+            document.getElementById('quienes-somos-bloque').style.display = 'none';
+            document.getElementById('panel-usuario').style.display = 'block';
+            document.getElementById('form-login').reset(); // Ahora se puede vaciar seguro porque ya lo recordamos arriba
+        } else {
+            alert(data.mensaje);
+        }
+    }).catch(err => { console.error(err); alert("Error en la base de datos."); });
+}
+
+
+        function registrarUsuario(event) {
+            event.preventDefault();
+            const n = document.getElementById('reg-nombre').value; const t = document.getElementById('reg-telefono').value;
+            const e = document.getElementById('reg-email').value; const ec = document.getElementById('reg-email-confirmar').value;
+            const p = document.getElementById('reg-password').value; const pc = document.getElementById('reg-password-confirmar').value;
+            if (e.toLowerCase() !== ec.toLowerCase()) { alert("❌ Los correos no coinciden."); return; }
+            if (p !== pc) { alert("❌ Las contraseñas no coinciden."); return; }
+
+            fetch(urlGoogleApp, { method: 'POST', body: JSON.stringify({ accion: "registrar", nombre: n, telefono: t, email: e, password: p }) })
+            .then(() => { alert('¡Registro exitoso!'); mostrarLogin(event); document.getElementById('form-registro').reset(); })
+            .catch(err => console.error(err));
+        }
+
+function cerrarSesion() { 
+    // Limpiamos los recuerdos de memoria por seguridad
+    emailGuardadoMemoria = "";
+    passwordGuardadoMemoria = "";
+    
+    document.getElementById('panel-usuario').style.display = 'none'; 
+    document.getElementById('quienes-somos-bloque').style.display = 'block';
+}
+
+        function abrirSelectorTurnos() { document.getElementById('seccion-nuevo-turno').style.display = 'block'; document.getElementById('turno-nuevo-dia').min = new Date().toISOString().split('T'); }
+        function cancelarNuevoTurno() { document.getElementById('seccion-nuevo-turno').style.display = 'none'; document.getElementById('turno-nueva-patente').value = ""; document.getElementById('turno-nuevo-dia').value = ""; document.getElementById('turno-nuevo-horario').innerHTML = '<option value="">-- Seleccioná un día --</option>'; }
+
+        function cargarHorariosDisponibles() {
+            const f = document.getElementById('turno-nuevo-dia').value; const sh = document.getElementById('turno-nuevo-horario'); if (!f) return;
+            let ds = new Date(f + 'T00:00:00').getDay();
+            if (ds === 0) { alert("Cerrado los domingos."); document.getElementById('turno-nuevo-dia').value = ""; return; }
+            sh.innerHTML = '<option value="">Consultando...</option>';
+            let hb = (ds >= 1 && ds <= 5) ? ["08:00", "09:00", "10:00", "11:00", "16:00", "17:00", "18:00", "19:00"] : ["08:00", "09:00", "10:00", "11:00"];
+            fetch(urlGoogleApp, { method: 'POST', body: JSON.stringify({ accion: "obtenerOcupados", fecha: f }) })
+            .then(res => res.json()).then(data => {
+                if (data.resultado === "ok") {
+                    let hd = hb.filter(h => !data.ocupados.includes(h)); sh.innerHTML = "";
+                    if (hd.length === 0) sh.innerHTML = '<option value="">❌ Sin turnos</option>';
+                    else { sh.innerHTML = '<option value="">-- Seleccioná horario --</option>'; hd.forEach(h => sh.innerHTML += `<option value="${h}">${h} hs</option>`); }
+                }
+            }).catch(err => console.error(err));
+        }
+
+        function guardarNuevoTurno() {
+            const pa = document.getElementById('turno-nueva-patente').value.trim(); 
+            const fe = document.getElementById('turno-nuevo-dia').value;
+            const ho = document.getElementById('turno-nuevo-horario').value; 
+            const em = document.getElementById('perfil-email').innerText;
+            
+            if (!pa || !fe || !ho) { 
+                alert("Por favor, completá todos los campos."); 
+                return; 
+            }
+
+            // Enviamos el nuevo turno al puente de Google
+            fetch(urlGoogleApp, { 
+                method: 'POST', 
+                body: JSON.stringify({ accion: "reservarTurno", email: em, fecha: fe, horario: ho, patente: pa }) 
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.resultado === "ok") {
+                    // 1. Cerramos y limpiamos el sector de carga de turnos
+                    cancelarNuevoTurno(); 
+                    
+                    // 2. Ejecutamos una actualización en vivo de las tablas sin recargar la página
+                    iniciarSesion(null); 
+                } else {
+                    alert("Hubo un problema al agendar el turno.");
+                }
+            })
+            .catch(err => {
+                // En caso de que impacte pero de un falso error de red, actualizamos igual
+                cancelarNuevoTurno();
+                iniciarSesion(null);
+            });
+        }
+
+    </script>
+</body>
+</html>
