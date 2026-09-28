@@ -187,7 +187,7 @@
 
 
         <script>
-        const urlGoogleApp = "https://script.google.com/macros/s/AKfycbxsWl1Aauj1fcSXOO3DvsKSIW1kMQEw-8_uwdOjeFEJqHjquWWDzXPsI275i_pRlUmOCA/exec";
+        const urlGoogleApp = "https://script.google.com/macros/s/AKfycbziaELEqc9K1IKN2iXdEZ6bDN-GRUEJUUneEWfGM2VFg60uunAq_vb7gOIsxaDJEL08FA/exec";
         let emailGuardadoMemoria = "";
         let passwordGuardadoMemoria = "";
         function abrirFormulario(event) { if (event) event.preventDefault(); document.getElementById('modalIngreso').style.display = 'flex'; document.getElementById('vista-login').style.display = 'block'; document.getElementById('vista-registro').style.display = 'none'; }
@@ -287,39 +287,41 @@ function cerrarSesion() {
         }
 
         function guardarNuevoTurno() {
-            const pa = document.getElementById('turno-nueva-patente').value.trim(); 
-            const fe = document.getElementById('turno-nuevo-dia').value;
-            const ho = document.getElementById('turno-nuevo-horario').value; 
-            const em = document.getElementById('perfil-email').innerText;
-            
-            if (!pa || !fe || !ho) { 
-                alert("Por favor, completá todos los campos."); 
-                return; 
-            }
+    const pa = document.getElementById('turno-nueva-patente').value.trim(); 
+    const fe = document.getElementById('turno-nuevo-dia').value;
+    const ho = document.getElementById('turno-nuevo-horario').value; 
+    const em = document.getElementById('perfil-email').innerText;
+    
+    if (!pa || !fe || !ho) { 
+        alert("Por favor, completá todos los campos."); 
+        return; 
+    }
 
-            // Enviamos el nuevo turno al puente de Google
-            fetch(urlGoogleApp, { 
-                method: 'POST', 
-                body: JSON.stringify({ accion: "reservarTurno", email: em, fecha: fe, horario: ho, patente: pa }) 
-            })
-            .then(res => res.json())
-            .then(data => {
-                if (data.resultado === "ok") {
-                    // 1. Cerramos y limpiamos el sector de carga de turnos
-                    cancelarNuevoTurno(); 
-                    
-                    // 2. Ejecutamos una actualización en vivo de las tablas sin recargar la página
-                    iniciarSesion(null); 
-                } else {
-                    alert("Hubo un problema al agendar el turno.");
-                }
-            })
-            .catch(err => {
-                // En caso de que impacte pero de un falso error de red, actualizamos igual
-                cancelarNuevoTurno();
-                iniciarSesion(null);
-            });
+    const btnConfirmar = document.querySelector("#seccion-nuevo-turno button");
+    if(btnConfirmar) btnConfirmar.innerText = "Procesando pago...";
+
+    fetch(urlGoogleApp, { 
+        method: 'POST', 
+        body: JSON.stringify({ accion: "reservarTurno", email: em, fecha: fe, horario: ho, patente: pa }) 
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.resultado === "mercadopago") {
+            cancelarNuevoTurno(); 
+            // Redirige al cliente directamente a abonar la seña
+            window.location.href = data.urlPago;
+        } else {
+            alert(data.mensaje || "Hubo un problema al conectar con Mercado Pago.");
+            if(btnConfirmar) btnConfirmar.innerText = "Confirmar Reserva";
         }
+    })
+    .catch(err => {
+        console.error(err);
+        alert("Error de conexión. Intentá nuevamente.");
+        if(btnConfirmar) btnConfirmar.innerText = "Confirmar Reserva";
+    });
+}
+
 
     </script>
 </body>
