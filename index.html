@@ -300,22 +300,35 @@ function cargarHorariosDisponibles() {
     const sh = document.getElementById('turno-nuevo-horario'); 
     if (!f) return;
     
-    // CORRECCIÓN IPHONE: Desarmamos el string AAAA-MM-DD para evitar el desvío de huso horario UTC
+    // 1. DESARMAR LA FECHA SELECCIONADA (Evita problemas de huso horario en iOS)
     let partes = f.split('-');
-    let anio = parseInt(partes[0], 10);
-    let mes = parseInt(partes[1], 10) - 1; // Los meses en JS van de 0 a 11
-    let dia = parseInt(partes[2], 10);
+    let anioSel = parseInt(partes[0], 10);
+    let mesSel = parseInt(partes[1], 10) - 1; // Meses de 0 a 11
+    let diaSel = parseInt(partes[2], 10);
+    let fechaSeleccionada = new Date(anioSel, mesSel, diaSel);
     
-    // Creamos la fecha puramente local
-    let fechaLocal = new Date(anio, mes, dia);
-    let ds = fechaLocal.getDay();
+    // 2. OBTENER LA FECHA DE HOY (A la medianoche local)
+    let ahora = new Date();
+    let hoyLocal = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
     
+    // 3. VALIDACIÓN PARA EVITAR HOY Y DÍAS ANTERIORES (Exclusivo para asegurar iPhone)
+    if (fechaSeleccionada <= hoyLocal) {
+        alert("❌ Los turnos deben solicitarse con al menos un día de anticipación (a partir de mañana).");
+        document.getElementById('turno-nuevo-dia').value = "";
+        sh.innerHTML = '<option value="">-- Seleccioná primero un día --</option>';
+        return;
+    }
+
+    // 4. VALIDACIÓN DE DOMINGOS
+    let ds = fechaSeleccionada.getDay();
     if (ds === 0) { 
         alert("Cerrado los domingos."); 
         document.getElementById('turno-nuevo-dia').value = ""; 
+        sh.innerHTML = '<option value="">-- Seleccioná primero un día --</option>';
         return; 
     }
     
+    // 5. CARGA DE HORARIOS SI PASÓ LAS VALIDACIONES
     sh.innerHTML = '<option value="">Consultando...</option>';
     let hb = (ds >= 1 && ds <= 5) ? ["08:00", "09:00", "10:00", "11:00", "16:00", "17:00", "18:00", "19:00"] : ["08:00", "09:00", "10:00", "11:00"];
     
@@ -328,6 +341,7 @@ function cargarHorariosDisponibles() {
         }
     }).catch(err => console.error(err));
 }
+
 
         function guardarNuevoTurno() {
     const pa = document.getElementById('turno-nueva-patente').value.trim(); 
