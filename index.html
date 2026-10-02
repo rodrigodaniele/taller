@@ -568,59 +568,71 @@ function cargarHorariosDisponibles() {
         }
 
         function cargarHistorialServiciosCliente() {
-            const contenedorHistorial = document.getElementById('tabla-historial-contenido');
-            
-            // Buscamos el correo del cliente que inició sesión (usando el texto inyectado en tu panel clásico)
-            const emailClienteLogueado = document.getElementById('perfil-email').innerText.trim();
-            
-            if (!emailClienteLogueado) {
-                contenedorHistorial.innerHTML = "<p style='color: red; text-align: center;'>Error: No se detectó la sesión del usuario.</p>";
+    const contenedorHistorial = document.getElementById('tabla-historial-contenido');
+    const emailClienteLogueado = document.getElementById('perfil-email').innerText.trim();
+    
+    if (!emailClienteLogueado) {
+        contenedorHistorial.innerHTML = "<p style='color: red; text-align: center;'>Error: No se detectó la sesión del usuario.</p>";
+        return;
+    }
+    
+    contenedorHistorial.innerHTML = "<p style='color: #aaa; text-align: center;'>Consultando tu historial en el servidor...</p>";
+    
+    fetch(URL_MI_WEBAPP, {
+        method: "POST",
+        body: JSON.stringify({
+            accion: "obtenerHistorialCliente",
+            emailCliente: emailClienteLogueado
+        })
+    })
+    .then(res => res.json())
+    .then(respuesta => {
+        if (respuesta.success) {
+            if (respuesta.historial.length === 0) {
+                contenedorHistorial.innerHTML = "<p style='color: #aaa; text-align: center; font-size: 13px;'>👋 Aún no registrás servicios realizados en nuestro taller con este correo.</p>";
                 return;
             }
             
-            contenedorHistorial.innerHTML = "<p style='color: #aaa; text-align: center;'>Consultando tu historial en el servidor...</p>";
-            
-            // Llamada segura vía Fetch URL a tu Apps Script
-            fetch(URL_MI_WEBAPP, {
-                method: "POST",
-                body: JSON.stringify({
-                    accion: "obtenerHistorialCliente",
-                    emailCliente: emailClienteLogueado
-                })
-            })
-            .then(res => res.json())
-            .then(respuesta => {
-                if (respuesta.success) {
-                    if (respuesta.historial.length === 0) {
-                        contenedorHistorial.innerHTML = "<p style='color: #aaa; text-align: center; font-size: 13px;'>👋 Aún no registrás servicios realizados en nuestro taller con este correo.</p>";
-                        return;
+            let htmlFichas = "";
+            respuesta.historial.forEach(ficha => {
+                // 📅 FORMATEADOR INTELIGENTE: Si viene el texto largo de Google, extrae solo el día, mes y año
+                let fechaLimpia = ficha.fecha;
+                if (ficha.fecha.includes("GMT") || ficha.fecha.includes("00:00:00")) {
+                    try {
+                        let d = new Date(ficha.fecha);
+                        let dia = String(d.getDate()).padStart(2, '0');
+                        let mes = String(d.getMonth() + 1).padStart(2, '0');
+                        let anio = d.getFullYear();
+                        fechaLimpia = `${dia}/${mes}/${anio}`;
+                    } catch(e) {
+                        fechaLimpia = ficha.fecha.substring(0, 10); // Respaldo por si falla
                     }
-                    
-                    let htmlFichas = "";
-                    respuesta.historial.forEach(ficha => {
-                        htmlFichas += `
-                            <div style='background-color: #0d0d0d; border: 1px solid #222; border-left: 5px solid #e31212; padding: 12px; margin-bottom: 12px; border-radius: 4px; line-height: 1.5;'>
-                                <div style='display: flex; justify-content: space-between; font-family: "Arial Black", sans-serif; font-size: 13px; margin-bottom: 5px;'>
-                                    <span style='color: #e31212;'>🚗 PATENTE: ${ficha.patente}</span>
-                                    <span style='color: #fff;'>📅 ${ficha.fecha}</span>
-                                </div>
-                                <div style='color: #ffffff; font-size: 14px; margin-top: 5px;'><strong>🛠️ Trabajo:</strong> ${ficha.trabajo}</div>
-                                <div style='display: flex; justify-content: space-between; font-size: 12px; color: #aaa; margin-top: 6px; border-top: 1px dashed #222; padding-top: 5px;'>
-                                    <span>📈 KM: ${Number(ficha.kilometraje).toLocaleString('es-AR')}</span>
-                                    <span style='color: #27ae60; font-weight: bold;'>💰 Total: $${Number(ficha.monto).toLocaleString('es-AR')}</span>
-                                </div>
-                            </div>
-                        `;
-                    });
-                    contenedorHistorial.innerHTML = htmlFichas;
-                } else {
-                    contenedorHistorial.innerHTML = "<p style='color: red; text-align: center;'>Error al recuperar datos.</p>";
                 }
-            })
-            .catch(err => {
-                contenedorHistorial.innerHTML = "<p style='color: orange; text-align: center;'>⚠️ Falla de red al conectar con el servidor.</p>";
+
+                htmlFichas += `
+                    <div style='background-color: #0d0d0d; border: 1px solid #222; border-left: 5px solid #e31212; padding: 12px; margin-bottom: 12px; border-radius: 4px; line-height: 1.5;'>
+                        <div style='background-color: #000; display: flex; justify-content: space-between; font-family: "Arial Black", sans-serif; font-size: 13px; margin-bottom: 5px;'>
+                            <span style='color: #e31212;'>🚗 PATENTE: ${ficha.patente}</span>
+                            <span style='color: #ffffff;'>📅 ${fechaLimpia}</span>
+                        </div>
+                        <div style='color: #ffffff; font-size: 14px; margin-top: 5px;'><strong>🛠️ Trabajo:</strong> ${ficha.trabajo}</div>
+                        <div style='display: flex; justify-content: space-between; font-size: 12px; color: #aaa; margin-top: 6px; border-top: 1px dashed #222; padding-top: 5px;'>
+                            <span>📈 KM: ${Number(ficha.kilometraje).toLocaleString('es-AR')}</span>
+                            <span style='color: #27ae60; font-weight: bold;'>💰 Total: $${Number(ficha.monto).toLocaleString('es-AR')}</span>
+                        </div>
+                    </div>
+                `;
             });
+            contenedorHistorial.innerHTML = htmlFichas;
+        } else {
+            contenedorHistorial.innerHTML = "<p style='color: red; text-align: center;'>Error al recuperar datos.</p>";
         }
+    })
+    .catch(err => {
+        contenedorHistorial.innerHTML = "<p style='color: orange; text-align: center;'>⚠️ Falla de red al conectar con el servidor.</p>";
+    });
+}
+
 
             
     </script>
