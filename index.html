@@ -269,14 +269,26 @@ function cerrarSesion() {
 
 function abrirSelectorTurnos() { 
     document.getElementById('seccion-nuevo-turno').style.display = 'block'; 
-
+    
+    // Obtiene la fecha local de hoy según el navegador del cliente
     let hoy = new Date();
+    
+    // Le sumamos exactamente 1 día para pararnos en mañana
     let mañana = new Date(hoy);
     mañana.setDate(hoy.getDate() + 1);
-
-    let fechaMinima = mañana.toISOString().split('T')[0];
-    document.getElementById('turno-nuevo-dia').min = fechaMinima; 
+    
+    // Extrae de forma manual Año, Mes y Día en formato local sin desfases de huso horario
+    let anio = mañana.getFullYear();
+    let mes = String(mañana.getMonth() + 1).padStart(2, '0'); // Los meses van de 0 a 11
+    let dia = String(mañana.getDate()).padStart(2, '0');
+    
+    // Arma la fecha limpia en formato AAAA-MM-DD que exige el calendario
+    let fechaMinimaLocal = `${anio}-${mes}-${dia}`;
+    
+    // Aplica el límite al calendario de la web
+    document.getElementById('turno-nuevo-dia').min = fechaMinimaLocal; 
 }
+
 
         function cancelarNuevoTurno() { document.getElementById('seccion-nuevo-turno').style.display = 'none'; document.getElementById('turno-nueva-patente').value = ""; document.getElementById('turno-nuevo-dia').value = ""; document.getElementById('turno-nuevo-horario').innerHTML = '<option value="">-- Seleccioná un día --</option>'; }
 
