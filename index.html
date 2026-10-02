@@ -739,6 +739,30 @@ function cargarHorariosDisponibles() {
                 cargarTurnosPendientes();
             });
         }
+// =========================================================================
+// 🔓 RESTAURACIÓN NATIVA: APERTURA DEL MODAL DE INGRESO CLÁSICO
+// =========================================================================
+function abrirFormulario(event) {
+    if (event) event.preventDefault(); // Evita que la página salte bruscamente al #
+    
+    // Buscamos tu caja de ingreso original que está definida en tus estilos CSS
+    const modalIngreso = document.getElementById('modalIngreso');
+    if (modalIngreso) {
+        modalIngreso.style.display = 'flex'; // Cambia a flex para centrarlo en la pantalla negra
+    } else {
+        // Respaldo por si en tu HTML el ID está escrito en minúsculas o varía
+        const modalAlternativo = document.getElementById('modal-ingreso');
+        if (modalAlternativo) modalAlternativo.style.display = 'flex';
+    }
+}
+
+// Función de cierre por las dudas si el botón de la cruz (X) te llega a fallar
+function cerrarFormulario() {
+    const modalIngreso = document.getElementById('modalIngreso') || document.getElementById('modal-ingreso');
+    if (modalIngreso) {
+        modalIngreso.style.display = 'none';
+    }
+}
 
             
     </script>
