@@ -270,12 +270,12 @@ function cerrarSesion() {
 function abrirSelectorTurnos() { 
     document.getElementById('seccion-nuevo-turno').style.display = 'block'; 
     
-    // Obtiene la fecha local de hoy según el navegador del cliente
-    let hoy = new Date();
+    // 1. Forzamos a que la fecha base sea SÍ O SÍ la hora real de Mendoza, sin importar el celular
+    let hoyArgentina = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Argentina/Mendoza"}));
     
-    // Le sumamos exactamente 1 día para pararnos en mañana
-    let mañana = new Date(hoy);
-    mañana.setDate(hoy.getDate() + 1);
+    // 2. Le sumamos exactamente 1 día para pararnos en mañana
+    let mañana = new Date(hoyArgentina);
+    mañana.setDate(hoyArgentina.getDate() + 1);
     
     // Extrae de forma manual Año, Mes y Día en formato local sin desfases de huso horario
     let anio = mañana.getFullYear();
@@ -286,8 +286,17 @@ function abrirSelectorTurnos() {
     let fechaMinimaLocal = `${anio}-${mes}-${dia}`;
     
     // Aplica el límite al calendario de la web
-    document.getElementById('turno-nuevo-dia').min = fechaMinimaLocal; 
+    let inputFecha = document.getElementById('turno-nuevo-dia');
+    if (inputFecha) {
+        inputFecha.min = fechaMinimaLocal; 
+        
+        // Anti-error extra para celulares: Si por alguna razón quedó seleccionada una fecha vieja, la limpia
+        if (inputFecha.value && inputFecha.value < fechaMinimaLocal) {
+            inputFecha.value = '';
+        }
+    }
 }
+
 
 
         function cancelarNuevoTurno() { document.getElementById('seccion-nuevo-turno').style.display = 'none'; document.getElementById('turno-nueva-patente').value = ""; document.getElementById('turno-nuevo-dia').value = ""; document.getElementById('turno-nuevo-horario').innerHTML = '<option value="">-- Seleccioná un día --</option>'; }
