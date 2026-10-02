@@ -379,7 +379,212 @@ function cargarHorariosDisponibles() {
     });
 }
 
+        // =========================================================================
+        // 🧠 BACKEND INTEGRADO DEL PANEL DE ADMINISTRACIÓN - ENLACE WEBAPP URL
+        // =========================================================================
+        // 🚨 RECORDATORIO: Reemplazá este texto de abajo por la URL real de tu WebApp que termina en /exec
+        const URL_MI_WEBAPP = "https://script.google.com/macros/s/AKfycbziaELEqc9K1IKN2iXdEZ6bDN-GRUEJUUneEWfGM2VFg60uunAq_vb7gOIsxaDJEL08FA/exec";
+        const EMAIL_ADMIN_OFICIAL = "rodrigodanieleaset@gmail.com";
+        let turnoActivoParaEditar = null;
+
+        // SISTEMA AUTOMÁTICO DE DETECCIÓN DE LOGIN: Escucha cuando entra Rodrigo
+        const espiarLoginAdmin = new MutationObserver(() => {
+            const spanEmail = document.getElementById('perfil-email');
+            if (spanEmail && spanEmail.innerText) {
+                const correoDetectado = spanEmail.innerText.toLowerCase().trim();
+                const botonMenuAdmin = document.getElementById('btn-administrador');
+                
+                if (correoDetectado === EMAIL_ADMIN_OFICIAL.toLowerCase()) {
+                    if (botonMenuAdmin) botonMenuAdmin.style.display = 'inline-block'; // Activa tu botón
+                } else {
+                    if (botonMenuAdmin) botonMenuAdmin.style.display = 'none';
+                }
+            }
+        });
+        
+        document.addEventListener("DOMContentLoaded", () => {
+            const objetivo = document.getElementById('perfil-email');
+            if (objetivo) espiarLoginAdmin.observe(objetivo, { childList: true, characterData: true, subtree: true });
+        });
+
+        // FUNCIONES DE CONTROL DE PANTALLAS
+        function abrirPanelAdmin() { document.getElementById('seccion-admin').style.display = 'block'; }
+        function cerrarPanelAdmin() { document.getElementById('seccion-admin').style.display = 'none'; }
+
+                    // CONEXIÓN POR URL VÍA FETCH POST PARA TRAER LOS AUTOS
+        function cargarTurnosPendientes() {
+            const contenedorLista = document.getElementById('lista-turnos-pendientes');
+            const buscadorContainer = document.getElementById('contenedor-buscador');
+            
+            contenedorLista.innerHTML = "<p style='color: #aaa; text-align: center; font-family: \"Arial Black\", sans-serif;'>Conectando con el servidor...</p>";
+            buscadorContainer.style.display = 'none';
+            
+            fetch(URL_MI_WEBAPP, {
+                method: "POST",
+                body: JSON.stringify({ accion: "obtenerTurnosAdmin" })
+            })
+            .then(res => res.json())
+            .then(respuesta => {
+                if (respuesta.success) {
+                    if (respuesta.turnos.length === 0) {
+                        contenedorLista.innerHTML = "<p style='color: #27ae60; text-align: center; font-weight: bold;'>🎉 ¡Excelente Rodrigo! No quedan turnos pendientes.</p>";
+                        return;
+                    }
+                    
+                    buscadorContainer.style.display = 'block';
+                    document.getElementById('caja-buscador').value = ''; 
+                    
+                    let htmlCard = "";
+                    respuesta.turnos.forEach(turno => {
+                        htmlCard += `
+                            <div class="tarjeta-turno-admin" onclick='abrirFichaReparacion(${JSON.stringify(turno)})' style='background-color: #000000; border: 2px solid #333; border-left: 6px solid #e31212; padding: 15px; margin-bottom: 12px; cursor: pointer; border-radius: 4px;'>
+                                <div style='display: flex; justify-content: space-between; font-family: "Arial Black", sans-serif; font-size: 14px; margin-bottom: 5px;'>
+                                    <span class="txt-patente" style='color: #e31212;'>🚗 PATENTE: ${turno.patente.toUpperCase()}</span>
+                                    <span style='color: #ffffff;'>⏰ ${turno.horario} Hs</span>
+                                </div>
+                                <div class="txt-correo" style='font-size: 13px; color: #aaa;'>📅 Fecha: ${turno.fecha.replace("'", "")} | 📧 Email: ${turno.email}</div>
+                            </div>
+                        `;
+                    });
+                    contenedorLista.innerHTML = htmlCard;
+                } else {
+                    contenedorLista.innerHTML = "<p style='color: red; text-align: center;'>Error: " + respuesta.error + "</p>";
+                }
+            })
+            .catch(err => {
+                contenedorLista.innerHTML = "<p style='color: orange; text-align: center;'>⚠️ Falla de respuesta de URL. Revisá la WebApp.</p>";
+            });
+        }
+
+        // BUSCADOR EN TIEMPO REAL (FILTRA MIENTRAS TIPÁS)
+        function filtrarTurnosEnTiempoReal() {
+            const textoBuscado = document.getElementById('caja-buscador').value.toLowerCase().trim();
+            const tarjetas = document.getElementsByClassName('tarjeta-turno-admin');
+            
+            for (let i = 0; i < tarjetas.length; i++) {
+                const patente = tarjetas[i].querySelector('.txt-patente').innerText.toLowerCase();
+                const correo = tarjetas[i].querySelector('.txt-correo').innerText.toLowerCase();
+                
+                if (patente.includes(textoBuscado) || correo.includes(textoBuscado)) {
+                    tarjetas[i].style.display = "block";
+                } else {
+                    tarjetas[i].style.display = "none";
+                }
+            }
+        }
+
+        function abrirFichaReparacion(turno) {
+            turnoActivoParaEditar = turno;
+            document.getElementById('info-vehiculo-modal').innerText = `Vehículo: ${turno.patente.toUpperCase()} (${turno.fecha.replace("'", "")})`;
+            document.getElementById('modal-detalle-trabajo').style.display = 'flex';
+        }
+
+        function cerrarModalTrabajo() {
+            document.getElementById('modal-detalle-trabajo').style.display = 'none';
+            document.getElementById('trabajo-kilometraje').value = '';
+            document.getElementById('trabajo-realizado').value = '';
+            document.getElementById('trabajo-monto').value = '';
+            turnoActivoParaEditar = null;
+        }
+
+        // GUARDAR ENVÍO VÍA FETCH POST AL SHEETS
+        function guardarDetalleTrabajo() {
+            const kms = document.getElementById('trabajo-kilometraje').value;
+            const trabajo = document.getElementById('trabajo-realizado').value;
+            const monto = document.getElementById('trabajo-monto').value;
+            
+            if (!kms || !trabajo || !monto) {
+                alert("Rodrigo, por favor completá el Kilometraje, el Trabajo Realizado y el Monto.");
+                return;
+            }
+            
+            const datosAEnviar = {
+                email: turnoActivoParaEditar.email,
+                fecha: turnoActivoParaEditar.fecha,
+                horario: turnoActivoParaEditar.horario,
+                patente: turnoActivoParaEditar.patente,
+                kilometraje: kms,
+                trabajoRealizado: trabajo,
+                montoFinal: monto
+            };
+            
+            document.getElementById('modal-detalle-trabajo').style.display = 'none';
+            document.getElementById('lista-turnos-pendientes').innerHTML = "<p style='color: #aaa; text-align: center;'>Guardando trabajo en el Excel...</p>";
+            
+            fetch(URL_MI_WEBAPP, {
+                method: "POST",
+                body: JSON.stringify({
+                    accion: "guardarTrabajoAdmin",
+                    datosTrabajo: datosAEnviar
+                })
+            })
+            .then(res => res.json())
+            .then(respuesta => {
+                if (respuesta.success) {
+                    alert("¡Trabajo registrado con éxito! Pasó a 'Atendido'.");
+                    cerrarModalTrabajo();
+                    cargarTurnosPendientes();
+                } else {
+                    alert("Error en el Sheets al archivar el turno.");
+                    cargarTurnosPendientes();
+                }
+            })
+            .catch(err => {
+                alert("Falla de red al intentar conectar.");
+                cargarTurnosPendientes();
+            });
+        }
 
     </script>
+        <!-- ========================================== -->
+    <!-- ⚙️ COMPONENTES EXCLUSIVOS DEL ADMINISTRADOR -->
+    <!-- ========================================== -->
+
+    <!-- BOTÓN DE ACCESO ADMINISTRADOR (Oculto de entrada) -->
+    <div style="max-width: 1000px; margin: 20px auto; padding: 0 20px; text-align: center;">
+        <button id="btn-administrador" style="display: none; width: 100%; max-width: 500px; padding: 14px 28px; font-family: 'Arial Black', sans-serif; font-size: 15px; text-transform: uppercase; border-radius: 4px; background-color: #000000; color: #ffffff; border: 3px solid #e31212; cursor: pointer;" onmouseover="this.style.backgroundColor='#1a1a1a'" onmouseout="this.style.backgroundColor='#000000'" onclick="abrirPanelAdmin()">
+            ⚙️ MENU DE ADMINISTRACIÓN
+        </button>
+    </div>
+
+        <!-- SECCIÓN DEL MENÚ MODULAR DE ADMIN (Fondo negro y bordes rojos) -->
+    <div id="seccion-admin" style="display: none; max-width: 650px; margin: 30px auto; padding: 25px; background-color: #0d0d0d; border: 3px solid #e31212; border-radius: 6px; box-shadow: 0px 5px 15px rgba(227, 18, 18, 0.2);">
+        <h2 style="font-family: 'Arial Black', sans-serif; color: #e31212; text-transform: uppercase; margin-top: 0; text-align: center; border-bottom: 3px solid #e31212; padding-bottom: 10px; font-size: 20px;">🔧 Panel de Control Admin</h2>
+        
+        <div style="display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap;">
+            <button onclick="cargarTurnosPendientes()" style="flex: 1; padding: 12px; background-color: #000; color: #fff; border: 2px solid #e31212; font-family: 'Arial Black', sans-serif; cursor: pointer; text-transform: uppercase; font-size: 11px;">🗓️ Ver Turnos Programados</button>
+            <button onclick="cerrarPanelAdmin()" style="flex: 1; padding: 12px; background-color: #e31212; color: #fff; border: none; font-family: 'Arial Black', sans-serif; cursor: pointer; text-transform: uppercase; font-size: 11px;">❌ Cerrar Menú</button>
+        </div>
+
+        <!-- BUSCADOR INTELIGENTE EN TIEMPO REAL -->
+        <div id="contenedor-buscador" style="display: none; margin-bottom: 20px;">
+            <label style="display: block; font-family: 'Arial Black', sans-serif; font-size: 11px; color: #aaa; text-transform: uppercase; margin-bottom: 6px;">Buscar por Patente o Correo:</label>
+            <input type="text" id="caja-buscador" onkeyup="filtrarTurnosEnTiempoReal()" placeholder="Ej: PEU534 o jorge..." style="width: 100%; padding: 12px; background-color: #000000; border: 2px solid #e31212; color: #ffffff; border-radius: 4px; box-sizing: border-box; font-size: 15px; text-transform: uppercase; font-weight: bold;">
+        </div>
+        
+        <div id="lista-turnos-pendientes">
+            <p style="color: #aaa; text-align: center; font-size: 14px;">Presioná "Ver Turnos Programados" para listar los vehículos.</p>
+        </div>
+    </div>
+    <!-- VENTANA EMERGENTE (MODAL) PARA CARGAR LA REPARACIÓN -->
+    <div id="modal-detalle-trabajo" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.92); justify-content: center; align-items: center; z-index: 3000;">
+        <div style="background-color: #000000; border: 3px solid #e31212; padding: 30px; border-radius: 8px; width: 90%; max-width: 420px; box-sizing: border-box; color: white;">
+            <h3 style="font-family: 'Arial Black', sans-serif; color: #e31212; text-transform: uppercase; text-align: center; margin-top: 0; font-size: 18px;">📝 Registrar Reparación</h3>
+            <p id="info-vehiculo-modal" style="font-weight: bold; text-align: center; background: #111; padding: 10px; border: 1px solid #333; border-radius: 4px; font-size: 14px; color: #fff;"></p>
+            
+            <label style="display: block; margin-top: 15px; font-size: 11px; color: #aaa; text-transform: uppercase; font-family: 'Arial Black', sans-serif;">1. Kilometraje Actual:</label>
+            <input type="number" id="trabajo-kilometraje" placeholder="Ej: 145000" style="width: 100%; padding: 10px; margin-top: 5px; background-color: #111; border: 1px solid #333; color: white; border-radius: 4px; box-sizing: border-box;">
+            
+            <label style="display: block; margin-top: 15px; font-size: 11px; color: #aaa; text-transform: uppercase; font-family: 'Arial Black', sans-serif;">2. Trabajo Realizado:</label>
+            <textarea id="trabajo-realizado" rows="3" placeholder="Ej: Alineación, balanceo y extremos nuevos" style="width: 100%; padding: 10px; margin-top: 5px; background-color: #111; border: 1px solid #333; color: white; border-radius: 4px; box-sizing: border-box; resize: none; font-family: Arial, sans-serif;"></textarea>
+            
+            <label style="display: block; margin-top: 15px; font-size: 11px; color: #aaa; text-transform: uppercase; font-family: 'Arial Black', sans-serif;">3. Monto Cobrado ($):</label>
+            <input type="number" id="trabajo-monto" placeholder="Ej: 45000" style="width: 100%; padding: 10px; margin-top: 5px; background-color: #111; border: 1px solid #333; color: white; border-radius: 4px; box-sizing: border-box;">
+            
+            <button onclick="guardarDetalleTrabajo()" style="width: 100%; background-color: #e31212; color: white; border: none; padding: 12px; font-weight: bold; text-transform: uppercase; margin-top: 25px; border-radius: 4px; cursor: pointer; font-family: 'Arial Black', sans-serif;">✅ Guardar Trabajo</button>
+            <button onclick="cerrarModalTrabajo()" style="width: 100%; background-color: #222; color: #bbb; border: 1px solid #444; padding: 10px; margin-top: 10px; border-radius: 4px; cursor: pointer; text-transform: uppercase; font-size: 12px;">Volver</button>
+        </div>
+    </div>
+
 </body>
 </html>
