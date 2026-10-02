@@ -267,45 +267,27 @@ function cerrarSesion() {
     document.getElementById('quienes-somos-bloque').style.display = 'block';
 }
 
-function abrirSelectorTurnos() { 
+        function abrirSelectorTurnos() { 
     document.getElementById('seccion-nuevo-turno').style.display = 'block'; 
     
-    // Forzamos a que la fecha base sea la hora real de Mendoza
-    let hoyArgentina = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Argentina/Mendoza"}));
+    // Obtiene la fecha local de hoy según el navegador del cliente
+    let hoy = new Date();
     
     // Le sumamos exactamente 1 día para pararnos en mañana
-    let mañana = new Date(hoyArgentina);
-    mañana.setDate(hoyArgentina.getDate() + 1);
+    let mañana = new Date(hoy);
+    mañana.setDate(hoy.getDate() + 1);
     
+    // Extrae de forma manual Año, Mes y Día en formato local sin desfases de huso horario
     let anio = mañana.getFullYear();
-    let mes = String(mañana.getMonth() + 1).padStart(2, '0');
+    let mes = String(mañana.getMonth() + 1).padStart(2, '0'); // Los meses van de 0 a 11
     let dia = String(mañana.getDate()).padStart(2, '0');
     
+    // Arma la fecha limpia en formato AAAA-MM-DD que exige el calendario
     let fechaMinimaLocal = `${anio}-${mes}-${dia}`;
     
-    let inputFecha = document.getElementById('turno-nuevo-dia');
-    if (inputFecha) {
-        inputFecha.min = fechaMinimaLocal; 
-        
-        // Validamos inmediatamente por si ya había algo cargado
-        validarFechaEstricta(inputFecha, fechaMinimaLocal);
-
-        // Agregamos el evento para que reaccione CADA VEZ que el usuario elige un día en el iPhone
-        inputFecha.onchange = function() {
-            validarFechaEstricta(inputFecha, fechaMinimaLocal);
-        };
-    }
+    // Aplica el límite al calendario de la web
+    document.getElementById('turno-nuevo-dia').min = fechaMinimaLocal; 
 }
-
-            function validarFechaEstricta(input, fechaMinima) {
-    if (input.value && input.value < fechaMinima) {
-        alert("Por cuestiones de organización, los turnos se deben agendar como mínimo a partir de mañana. Por favor, seleccioná otra fecha.");
-        input.value = ''; // Borra la fecha inválida que seleccionó en el iPhone
-    }
-}
-
-
-
 
         function cancelarNuevoTurno() { document.getElementById('seccion-nuevo-turno').style.display = 'none'; document.getElementById('turno-nueva-patente').value = ""; document.getElementById('turno-nuevo-dia').value = ""; document.getElementById('turno-nuevo-horario').innerHTML = '<option value="">-- Seleccioná un día --</option>'; }
 
