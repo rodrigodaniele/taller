@@ -69,6 +69,22 @@
         </div>
         
         <button onclick="abrirSelectorTurnos()" style="background-color: #e31212; color: white; border: none; padding: 12px; font-weight: bold; border-radius: 4px; cursor: pointer; text-transform: uppercase; font-family: 'Arial Black', sans-serif; margin-bottom: 20px; width: 100%;">📅 Solicitar Nuevo Turno</button>
+
+                <!-- 🔍 BOTÓN DE HISTORIAL PARA EL CLIENTE -->
+        <button onclick="toggleHistorialServicios()" style="background-color: #000000; color: white; border: 2px solid #e31212; padding: 12px; font-weight: bold; border-radius: 4px; cursor: pointer; text-transform: uppercase; font-family: 'Arial Black', sans-serif; margin-bottom: 20px; width: 100%;" onmouseover="this.style.backgroundColor='#1a1a1a'" onmouseout="this.style.backgroundColor='#000000'">
+            🔍 Ver Servicios Realizados
+        </button>
+        
+        <!-- 📋 CONTENEDOR DEL HISTORIAL (Nace oculto) -->
+        <div id="seccion-historial-cliente" style="display: none; background-color: #000000; padding: 20px; border-radius: 8px; border: 2px solid #e31212; text-align: left; margin-top: 15px; box-shadow: 0px 4px 15px rgba(227, 18, 18, 0.15);">
+            <h3 style="color: #ffffff; text-transform: uppercase; font-family: 'Arial Black', sans-serif; text-align: center; margin-top: 0; margin-bottom: 15px; font-size: 15px; border-bottom: 1px solid #222; padding-bottom: 10px;">📋 Registro Histórico de Trabajos</h3>
+            
+            <div id="tabla-historial-contenido">
+                <!-- Acá se van a cargar dinámicamente las tarjetas de reparaciones -->
+                <p style="color: #aaa; text-align: center; font-size: 13px;">Cargando historial...</p>
+            </div>
+        </div>
+
         
         <!-- Tarjeta de reservar turno rediseñada -->
         <div id="seccion-nuevo-turno" style="display: none; background-color: #000000; padding: 25px; border-radius: 8px; border: 2px solid #e31212; text-align: left; margin: 25px auto; max-width: 500px; box-shadow: 0px 4px 15px rgba(227, 18, 18, 0.15);">
@@ -535,6 +551,78 @@ function cargarHorariosDisponibles() {
             });
         }
 
+                    // =========================================================================
+        // 🔍 CONSULTA DE HISTORIAL CLÍNICO DE SERVICIOS PARA EL CLIENTE
+        // =========================================================================
+        function toggleHistorialServicios() {
+            const panelHistorial = document.getElementById('seccion-historial-cliente');
+            
+            // Si el panel está oculto, lo abrimos y cargamos los datos
+            if (panelHistorial.style.display === 'none') {
+                panelHistorial.style.display = 'block';
+                cargarHistorialServiciosCliente();
+            } else {
+                // Si ya estaba abierto, lo cerramos
+                panelHistorial.style.display = 'none';
+            }
+        }
+
+        function cargarHistorialServiciosCliente() {
+            const contenedorHistorial = document.getElementById('tabla-historial-contenido');
+            
+            // Buscamos el correo del cliente que inició sesión (usando el texto inyectado en tu panel clásico)
+            const emailClienteLogueado = document.getElementById('perfil-email').innerText.trim();
+            
+            if (!emailClienteLogueado) {
+                contenedorHistorial.innerHTML = "<p style='color: red; text-align: center;'>Error: No se detectó la sesión del usuario.</p>";
+                return;
+            }
+            
+            contenedorHistorial.innerHTML = "<p style='color: #aaa; text-align: center;'>Consultando tu historial en el servidor...</p>";
+            
+            // Llamada segura vía Fetch URL a tu Apps Script
+            fetch(URL_MI_WEBAPP, {
+                method: "POST",
+                body: JSON.stringify({
+                    accion: "obtenerHistorialCliente",
+                    emailCliente: emailClienteLogueado
+                })
+            })
+            .then(res => res.json())
+            .then(respuesta => {
+                if (respuesta.success) {
+                    if (respuesta.historial.length === 0) {
+                        contenedorHistorial.innerHTML = "<p style='color: #aaa; text-align: center; font-size: 13px;'>👋 Aún no registrás servicios realizados en nuestro taller con este correo.</p>";
+                        return;
+                    }
+                    
+                    let htmlFichas = "";
+                    respuesta.historial.forEach(ficha => {
+                        htmlFichas += `
+                            <div style='background-color: #0d0d0d; border: 1px solid #222; border-left: 5px solid #e31212; padding: 12px; margin-bottom: 12px; border-radius: 4px; line-height: 1.5;'>
+                                <div style='display: flex; justify-content: space-between; font-family: "Arial Black", sans-serif; font-size: 13px; margin-bottom: 5px;'>
+                                    <span style='color: #e31212;'>🚗 PATENTE: ${ficha.patente}</span>
+                                    <span style='color: #fff;'>📅 ${ficha.fecha}</span>
+                                </div>
+                                <div style='color: #ffffff; font-size: 14px; margin-top: 5px;'><strong>🛠️ Trabajo:</strong> ${ficha.trabajo}</div>
+                                <div style='display: flex; justify-content: space-between; font-size: 12px; color: #aaa; margin-top: 6px; border-top: 1px dashed #222; padding-top: 5px;'>
+                                    <span>📈 KM: ${Number(ficha.kilometraje).toLocaleString('es-AR')}</span>
+                                    <span style='color: #27ae60; font-weight: bold;'>💰 Total: $${Number(ficha.monto).toLocaleString('es-AR')}</span>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    contenedorHistorial.innerHTML = htmlFichas;
+                } else {
+                    contenedorHistorial.innerHTML = "<p style='color: red; text-align: center;'>Error al recuperar datos.</p>";
+                }
+            })
+            .catch(err => {
+                contenedorHistorial.innerHTML = "<p style='color: orange; text-align: center;'>⚠️ Falla de red al conectar con el servidor.</p>";
+            });
+        }
+
+            
     </script>
         <!-- ========================================== -->
     <!-- ⚙️ COMPONENTES EXCLUSIVOS DEL ADMINISTRADOR -->
