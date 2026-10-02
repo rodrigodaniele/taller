@@ -267,45 +267,67 @@ function cerrarSesion() {
     document.getElementById('quienes-somos-bloque').style.display = 'block';
 }
 
-        function abrirSelectorTurnos() { 
+function abrirSelectorTurnos() { 
     document.getElementById('seccion-nuevo-turno').style.display = 'block'; 
     
-    // Obtiene la fecha local de hoy según el navegador del cliente
-    let hoy = new Date();
+    // Obtenemos la fecha local actual desarmando sus componentes nativos
+    let ahora = new Date();
+    let anio = ahora.getFullYear();
+    let mes = String(ahora.getMonth() + 1).padStart(2, '0');
+    let dia = String(ahora.getDate()).padStart(2, '0');
     
-    // Le sumamos exactamente 1 día para pararnos en mañana
-    let mañana = new Date(hoy);
-    mañana.setDate(hoy.getDate() + 1);
+    // Creamos una fecha limpia de HOY a la medianoche local
+    let hoyLocal = new Date(`${anio}-${mes}-${dia}T00:00:00`);
     
-    // Extrae de forma manual Año, Mes y Día en formato local sin desfases de huso horario
-    let anio = mañana.getFullYear();
-    let mes = String(mañana.getMonth() + 1).padStart(2, '0'); // Los meses van de 0 a 11
-    let dia = String(mañana.getDate()).padStart(2, '0');
+    // Le sumamos un día para que sea MAÑANA
+    hoyLocal.setDate(hoyLocal.getDate() + 1);
     
-    // Arma la fecha limpia en formato AAAA-MM-DD que exige el calendario
-    let fechaMinimaLocal = `${anio}-${mes}-${dia}`;
+    // Volvemos a formatear para el atributo .min del iPhone
+    let safeAnio = hoyLocal.getFullYear();
+    let safeMes = String(hoyLocal.getMonth() + 1).padStart(2, '0');
+    let safeDia = String(hoyLocal.getDate()).padStart(2, '0');
     
-    // Aplica el límite al calendario de la web
+    let fechaMinimaLocal = `${safeAnio}-${safeMes}-${safeDia}`;
+    
+    // Aplica el límite de forma estricta compatible con iOS
     document.getElementById('turno-nuevo-dia').min = fechaMinimaLocal; 
 }
 
         function cancelarNuevoTurno() { document.getElementById('seccion-nuevo-turno').style.display = 'none'; document.getElementById('turno-nueva-patente').value = ""; document.getElementById('turno-nuevo-dia').value = ""; document.getElementById('turno-nuevo-horario').innerHTML = '<option value="">-- Seleccioná un día --</option>'; }
 
-        function cargarHorariosDisponibles() {
-            const f = document.getElementById('turno-nuevo-dia').value; const sh = document.getElementById('turno-nuevo-horario'); if (!f) return;
-            let ds = new Date(f + 'T00:00:00').getDay();
-            if (ds === 0) { alert("Cerrado los domingos."); document.getElementById('turno-nuevo-dia').value = ""; return; }
-            sh.innerHTML = '<option value="">Consultando...</option>';
-            let hb = (ds >= 1 && ds <= 5) ? ["08:00", "09:00", "10:00", "11:00", "16:00", "17:00", "18:00", "19:00"] : ["08:00", "09:00", "10:00", "11:00"];
-            fetch(urlGoogleApp, { method: 'POST', body: JSON.stringify({ accion: "obtenerOcupados", fecha: f }) })
-            .then(res => res.json()).then(data => {
-                if (data.resultado === "ok") {
-                    let hd = hb.filter(h => !data.ocupados.includes(h)); sh.innerHTML = "";
-                    if (hd.length === 0) sh.innerHTML = '<option value="">❌ Sin turnos</option>';
-                    else { sh.innerHTML = '<option value="">-- Seleccioná horario --</option>'; hd.forEach(h => sh.innerHTML += `<option value="${h}">${h} hs</option>`); }
-                }
-            }).catch(err => console.error(err));
+function cargarHorariosDisponibles() {
+    const f = document.getElementById('turno-nuevo-dia').value; 
+    const sh = document.getElementById('turno-nuevo-horario'); 
+    if (!f) return;
+    
+    // CORRECCIÓN IPHONE: Desarmamos el string AAAA-MM-DD para evitar el desvío de huso horario UTC
+    let partes = f.split('-');
+    let anio = parseInt(partes[0], 10);
+    let mes = parseInt(partes[1], 10) - 1; // Los meses en JS van de 0 a 11
+    let dia = parseInt(partes[2], 10);
+    
+    // Creamos la fecha puramente local
+    let fechaLocal = new Date(anio, mes, dia);
+    let ds = fechaLocal.getDay();
+    
+    if (ds === 0) { 
+        alert("Cerrado los domingos."); 
+        document.getElementById('turno-nuevo-dia').value = ""; 
+        return; 
+    }
+    
+    sh.innerHTML = '<option value="">Consultando...</option>';
+    let hb = (ds >= 1 && ds <= 5) ? ["08:00", "09:00", "10:00", "11:00", "16:00", "17:00", "18:00", "19:00"] : ["08:00", "09:00", "10:00", "11:00"];
+    
+    fetch(urlGoogleApp, { method: 'POST', body: JSON.stringify({ accion: "obtenerOcupados", fecha: f }) })
+    .then(res => res.json()).then(data => {
+        if (data.resultado === "ok") {
+            let hd = hb.filter(h => !data.ocupados.includes(h)); sh.innerHTML = "";
+            if (hd.length === 0) sh.innerHTML = '<option value="">❌ Sin turnos</option>';
+            else { sh.innerHTML = '<option value="">-- Seleccioná horario --</option>'; hd.forEach(h => sh.innerHTML += `<option value="${h}">${h} hs</option>`); }
         }
+    }).catch(err => console.error(err));
+}
 
         function guardarNuevoTurno() {
     const pa = document.getElementById('turno-nueva-patente').value.trim(); 
