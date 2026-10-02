@@ -270,32 +270,33 @@ function cerrarSesion() {
 function abrirSelectorTurnos() { 
     document.getElementById('seccion-nuevo-turno').style.display = 'block'; 
     
-    // 1. Forzamos a que la fecha base sea SÍ O SÍ la hora real de Mendoza, sin importar el celular
+    // Forzamos a que la fecha base sea la hora real de Mendoza
     let hoyArgentina = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Argentina/Mendoza"}));
     
-    // 2. Le sumamos exactamente 1 día para pararnos en mañana
+    // Le sumamos exactamente 1 día para pararnos en mañana
     let mañana = new Date(hoyArgentina);
     mañana.setDate(hoyArgentina.getDate() + 1);
     
-    // Extrae de forma manual Año, Mes y Día en formato local sin desfases de huso horario
     let anio = mañana.getFullYear();
-    let mes = String(mañana.getMonth() + 1).padStart(2, '0'); // Los meses van de 0 a 11
+    let mes = String(mañana.getMonth() + 1).padStart(2, '0');
     let dia = String(mañana.getDate()).padStart(2, '0');
     
-    // Arma la fecha limpia en formato AAAA-MM-DD que exige el calendario
     let fechaMinimaLocal = `${anio}-${mes}-${dia}`;
     
-    // Aplica el límite al calendario de la web
     let inputFecha = document.getElementById('turno-nuevo-dia');
     if (inputFecha) {
         inputFecha.min = fechaMinimaLocal; 
         
-        // Anti-error extra para celulares: Si por alguna razón quedó seleccionada una fecha vieja, la limpia
-        if (inputFecha.value && inputFecha.value < fechaMinimaLocal) {
-            inputFecha.value = '';
-        }
+        // Validamos inmediatamente por si ya había algo cargado
+        validarFechaEstricta(inputFecha, fechaMinimaLocal);
+
+        // Agregamos el evento para que reaccione CADA VEZ que el usuario elige un día en el iPhone
+        inputFecha.onchange = function() {
+            validarFechaEstricta(inputFecha, fechaMinimaLocal);
+        };
     }
 }
+
 
 
 
