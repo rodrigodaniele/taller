@@ -418,44 +418,48 @@ function cargarHorariosDisponibles() {
 
         // TRAER LOS TURNOS PROGRAMADOS DESDE EL SHEETS
         function cargarTurnosPendientes() {
-            const contenedorLista = document.getElementById('lista-turnos-pendientes');
-            const buscadorContainer = document.getElementById('contenedor-buscador');
-            
-            contenedorLista.innerHTML = "<p style='color: #aaa; text-align: center; font-family: \"Arial Black\", sans-serif;'>Buscando en Google Sheets...</p>";
-            buscadorContainer.style.display = 'none'; // Oculta el buscador mientras carga
-            
-            google.script.run
-                .withSuccessHandler(function(respuesta) {
-                    if (respuesta.success) {
-                        if (respuesta.turnos.length === 0) {
-                            contenedorLista.innerHTML = "<p style='color: #27ae60; text-align: center; font-weight: bold; font-family: \"Arial Black\", sans-serif;'>🎉 ¡Excelente Rodrigo! No quedan turnos pendientes.</p>";
-                            return;
-                        }
-                        
-                        buscadorContainer.style.display = 'block'; // Muestra el buscador si hay turnos
-                        document.getElementById('caja-buscador').value = ''; // Resetea la búsqueda
-                        
-                        let htmlCard = "";
-                        respuesta.turnos.forEach(turno => {
-                            let fechaTexto = turno.fecha.replace("'", "");
-                            // Guardamos la estructura en una "tarjeta de turno" con clase 'tarjeta-turno-admin'
-                            htmlCard += `
-                                <div class="tarjeta-turno-admin" onclick='abrirFichaReparacion(${JSON.stringify(turno)})' style='background-color: #000000; border: 2px solid #333; border-left: 6px solid #e31212; padding: 15px; margin-bottom: 12px; cursor: pointer; border-radius: 4px; transition: all 0.2s;' onmouseover='this.style.borderColor="#e31212"' onmouseout='this.style.borderColor="#333"'>
-                                    <div style='display: flex; justify-content: space-between; font-family: "Arial Black", sans-serif; font-size: 14px; margin-bottom: 5px;'>
-                                        <span class="txt-patente" style='color: #e31212;'>🚗 PATENTE: ${turno.patente.toUpperCase()}</span>
-                                        <span style='color: #ffffff;'>⏰ ${turno.horario} Hs</span>
-                                    </div>
-                                    <div class="txt-correo" style='font-size: 13px; color: #aaa;'>📅 Fecha: ${fechaTexto} | 📧 Email: ${turno.email}</div>
-                                </div>
-                            `;
-                        });
-                        contenedorLista.innerHTML = htmlCard;
-                    } else {
-                        contenedorLista.innerHTML = "<p style='color: red; text-align: center;'>Error: " + respuesta.error + "</p>";
-                    }
-                })
-                .obtenerTurnosPendientesAdmin(EMAIL_ADMIN_OFICIAL);
-        }
+    const contenedorLista = document.getElementById('lista-turnos-pendientes');
+    const buscadorContainer = document.getElementById('contenedor-buscador');
+    
+    contenedorLista.innerHTML = "<p style='color: #aaa; text-align: center; font-family: \"Arial Black\", sans-serif;'>Buscando en Google Sheets...</p>";
+    buscadorContainer.style.display = 'none'; 
+    
+    google.script.run
+        .withSuccessHandler(function(respuesta) {
+            if (respuesta.success) {
+                if (respuesta.turnos.length === 0) {
+                    contenedorLista.innerHTML = "<p style='color: #27ae60; text-align: center; font-weight: bold; font-family: \"Arial Black\", sans-serif;'>🎉 ¡Excelente Rodrigo! No quedan turnos pendientes.</p>";
+                    return;
+                }
+                
+                buscadorContainer.style.display = 'block'; 
+                document.getElementById('caja-buscador').value = ''; 
+                
+                let htmlCard = "";
+                respuesta.turnos.forEach(turno => {
+                    let fechaTexto = turno.fecha.replace("'", "");
+                    htmlCard += `
+                        <div class="tarjeta-turno-admin" onclick='abrirFichaReparacion(${JSON.stringify(turno)})' style='background-color: #000000; border: 2px solid #333; border-left: 6px solid #e31212; padding: 15px; margin-bottom: 12px; cursor: pointer; border-radius: 4px; transition: all 0.2s;' onmouseover='this.style.borderColor="#e31212"' onmouseout='this.style.borderColor="#333"'>
+                            <div style='display: flex; justify-content: space-between; font-family: "Arial Black", sans-serif; font-size: 14px; margin-bottom: 5px;'>
+                                <span class="txt-patente" style='color: #e31212;'>🚗 PATENTE: ${turno.patente.toUpperCase()}</span>
+                                <span style='color: #ffffff;'>⏰ ${turno.horario} Hs</span>
+                            </div>
+                            <div class="txt-correo" style='font-size: 13px; color: #aaa;'>📅 Fecha: ${fechaTexto} | 📧 Email: ${turno.email}</div>
+                        </div>
+                    `;
+                });
+                contenedorLista.innerHTML = htmlCard;
+            } else {
+                contenedorLista.innerHTML = "<p style='color: red; text-align: center;'>⚠️ Error del Script: " + respuesta.error + "</p>";
+            }
+        })
+        // 🚨 SI EL SCRIPT SE ROMPE O CRASHEA, ESTO TE MUESTRA EL CARTEL CON EL ERROR REAL
+        .withFailureHandler(function(errorFalla) {
+            contenedorLista.innerHTML = "<p style='color: #ff9f43; text-align: center; font-weight: bold;'>⚠️ Falla de conexión con Google Apps Script:<br><span style='color: white; font-family: Arial; font-size: 13px;'>" + errorFalla.message + "</span></p>";
+        })
+        .obtenerTurnosPendientesAdmin(EMAIL_ADMIN_OFICIAL);
+}
+
 
         // 🔍 FILTRO INTELIGENTE EN TIEMPO REAL (LA MAGIA DE LA BÚSQUEDA)
         function filtrarTurnosEnTiempoReal() {
