@@ -267,7 +267,17 @@ function cerrarSesion() {
     document.getElementById('quienes-somos-bloque').style.display = 'block';
 }
 
-        function abrirSelectorTurnos() { document.getElementById('seccion-nuevo-turno').style.display = 'block'; document.getElementById('turno-nuevo-dia').min = new Date().toISOString().split('T'); }
+function abrirSelectorTurnos() { 
+    document.getElementById('seccion-nuevo-turno').style.display = 'block'; 
+
+    let hoy = new Date();
+    let mañana = new Date(hoy);
+    mañana.setDate(hoy.getDate() + 1);
+
+    let fechaMinima = mañana.toISOString().split('T')[0];
+    document.getElementById('turno-nuevo-dia').min = fechaMinima; 
+}
+
         function cancelarNuevoTurno() { document.getElementById('seccion-nuevo-turno').style.display = 'none'; document.getElementById('turno-nueva-patente').value = ""; document.getElementById('turno-nuevo-dia').value = ""; document.getElementById('turno-nuevo-horario').innerHTML = '<option value="">-- Seleccioná un día --</option>'; }
 
         function cargarHorariosDisponibles() {
