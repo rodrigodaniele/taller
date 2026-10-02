@@ -297,6 +297,13 @@ function abrirSelectorTurnos() {
     }
 }
 
+            function validarFechaEstricta(input, fechaMinima) {
+    if (input.value && input.value < fechaMinima) {
+        alert("Por cuestiones de organización, los turnos se deben agendar como mínimo a partir de mañana. Por favor, seleccioná otra fecha.");
+        input.value = ''; // Borra la fecha inválida que seleccionó en el iPhone
+    }
+}
+
 
 
 
