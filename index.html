@@ -633,112 +633,6 @@ function cargarHorariosDisponibles() {
     });
 }
 
-    <!-- VENTANA EMERGENTE (MODAL) PARA REGISTRAR TURNO MANUAL (ADMIN) -->
-    <div id="modal-turno-manual" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.92); justify-content: center; align-items: center; z-index: 3000;">
-        <div style="background-color: #000000; border: 3px solid #e31212; padding: 30px; border-radius: 8px; width: 90%; max-width: 420px; box-sizing: border-box; color: white;">
-            <h3 style="font-family: 'Arial Black', sans-serif; color: #e31212; text-transform: uppercase; text-align: center; margin-top: 0; font-size: 18px; border-bottom: 1px solid #222; padding-bottom: 10px;">🗓️ Agendar Turno Manual</h3>
-            
-            <label style="display: block; margin-top: 15px; font-size: 11px; color: #aaa; text-transform: uppercase; font-family: 'Arial Black', sans-serif;">1. Email del Cliente:</label>
-            <input type="email" id="manual-email" placeholder="Ej: cliente@gmail.com" style="width: 100%; padding: 10px; margin-top: 5px; background-color: #111; border: 1px solid #333; color: white; border-radius: 4px; box-sizing: border-box;">
-            
-            <label style="display: block; margin-top: 15px; font-size: 11px; color: #aaa; text-transform: uppercase; font-family: 'Arial Black', sans-serif;">2. Patente del Vehículo:</label>
-            <input type="text" id="manual-patente" placeholder="Ej: AE123MZ" style="width: 100%; padding: 10px; margin-top: 5px; background-color: #111; border: 1px solid #333; color: white; border-radius: 4px; box-sizing: border-box; text-transform: uppercase; font-weight: bold;">
-            
-            <label style="display: block; margin-top: 15px; font-size: 11px; color: #aaa; text-transform: uppercase; font-family: 'Arial Black', sans-serif;">3. Seleccioná el Día:</label>
-            <input type="date" id="manual-fecha" style="width: 100%; padding: 10px; margin-top: 5px; background-color: #111; border: 1px solid #333; color: white; border-radius: 4px; box-sizing: border-box;">
-            
-            <label style="display: block; margin-top: 15px; font-size: 11px; color: #aaa; text-transform: uppercase; font-family: 'Arial Black', sans-serif;">4. Horario (Ej: 08:30 o 16:00):</label>
-            <input type="text" id="manual-horario" placeholder="Ej: 08:30" style="width: 100%; padding: 10px; margin-top: 5px; background-color: #111; border: 1px solid #333; color: white; border-radius: 4px; box-sizing: border-box;">
-            
-            <button onclick="guardarTurnoManualAdmin()" style="width: 100%; background-color: #e31212; color: white; border: none; padding: 12px; font-weight: bold; text-transform: uppercase; margin-top: 25px; border-radius: 4px; cursor: pointer; font-family: 'Arial Black', sans-serif;">✅ Agendar e Inyectar en Excel</button>
-            <button onclick="cerrarModalTurnoManual()" style="background-color: #222; color: #bbb; border: 1px solid #444; padding: 10px; margin-top: 10px; border-radius: 4px; cursor: pointer; width: 100%; text-transform: uppercase; font-size: 12px;">Volver</button>
-        </div>
-    </div>
-
-                    // =========================================================================
-        // ➕ GESTIÓN DE ALTA DE TURNOS MANUALES DIRECTOS (ADMIN)
-        // =========================================================================
-        function abrirModalTurnoManual() {
-            // Limpiamos los campos por las dudas
-            document.getElementById('manual-email').value = '';
-            document.getElementById('manual-patente').value = '';
-            document.getElementById('manual-fecha').value = '';
-            document.getElementById('manual-horario').value = '';
-            
-            // 📱 BLINDAJE DE FECHAS EN EL INPUT MANUAL (Bloquea hoy y pasado)
-            const inputFechaManual = document.getElementById('manual-fecha');
-            if (inputFechaManual) {
-                let hoyArg = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Argentina/Mendoza"}));
-                let mañanaArg = new Date(hoyArg);
-                mañanaArg.setDate(hoyArg.getDate() + 1);
-                
-                let anio = mañanaArg.getFullYear();
-                let mes = String(mañanaArg.getMonth() + 1).padStart(2, '0');
-                let dia = String(mañanaArg.getDate()).padStart(2, '0');
-                let minLocal = `${anio}-${mes}-${dia}`;
-                
-                inputFechaManual.min = minLocal;
-                
-                // Validador en tiempo real por si el iPhone se pasa de vivo
-                inputFechaManual.onchange = function() {
-                    if (inputFechaManual.value && inputFechaManual.value < minLocal) {
-                        alert("Rodrigo, por organización los turnos deben ser como mínimo a partir de mañana.");
-                        inputFechaManual.value = '';
-                    }
-                };
-            }
-            
-            document.getElementById('modal-turno-manual').style.display = 'flex';
-        }
-
-        function cerrarModalTurnoManual() {
-            document.getElementById('modal-turno-manual').style.display = 'none';
-        }
-
-        function guardarTurnoManualAdmin() {
-            const correo = document.getElementById('manual-email').value.trim();
-            const patente = document.getElementById('manual-patente').value.trim();
-            const fecha = document.getElementById('manual-fecha').value;
-            const horario = document.getElementById('manual-horario').value.trim();
-            
-            if (!correo || !patente || !fecha || !horario) {
-                alert("Rodrigo, por favor completá el Email, Patente, Fecha y Horario del turno.");
-                return;
-            }
-            
-            const datosTurnoManual = {
-                email: correo,
-                fecha: fecha,
-                horario: horario,
-                patente: patente
-            };
-            
-            document.getElementById('modal-turno-manual').style.display = 'none';
-            document.getElementById('lista-turnos-pendientes').innerHTML = "<p style='color: #aaa; text-align: center;'>Inyectando turno directo en el Excel...</p>";
-            
-            fetch(URL_MI_WEBAPP, {
-                method: "POST",
-                body: JSON.stringify({
-                    accion: "cargarTurnoManualAdmin",
-                    datosTurno: datosTurnoManual
-                })
-            })
-            .then(res => res.json())
-            .then(respuesta => {
-                if (respuesta.success) {
-                    alert("¡Turno agendado con éxito! Se cargó como 'Programado' en el Sheets.");
-                    cerrarModalTurnoManual();
-                    cargarTurnosPendientes(); // Recarga la lista para que veas el nuevo turno que metiste
-                } else {
-                    alert("Error en el servidor al registrar el turno manual.");
-                    cargarTurnosPendientes();
-                }
-            })
-            .catch(err => {
-                alert("Falla de red al intentar conectar.");
-                cargarTurnosPendientes();
-            });
-        }
 
             
     </script>
@@ -760,8 +654,6 @@ function cargarHorariosDisponibles() {
         <div style="display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap;">
             <button onclick="cargarTurnosPendientes()" style="flex: 1; padding: 12px; background-color: #000; color: #fff; border: 2px solid #e31212; font-family: 'Arial Black', sans-serif; cursor: pointer; text-transform: uppercase; font-size: 11px;">🗓️ Ver Turnos Programados</button>
             <button onclick="cerrarPanelAdmin()" style="flex: 1; padding: 12px; background-color: #e31212; color: #fff; border: none; font-family: 'Arial Black', sans-serif; cursor: pointer; text-transform: uppercase; font-size: 11px;">❌ Cerrar Menú</button>
-            <button onclick="abrirModalTurnoManual()" style="flex: 1; padding: 12px; background-color: #000; color: #fff; border: 2px solid #e31212; font-family: 'Arial Black', sans-serif; cursor: pointer; text-transform: uppercase; font-size: 11px;">➕ Agendar Turno Manual</button>
-
         </div>
 
         <!-- BUSCADOR INTELIGENTE EN TIEMPO REAL -->
