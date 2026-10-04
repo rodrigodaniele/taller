@@ -1508,18 +1508,34 @@ function doOptions(e) {
                 />
               </div>
 
-              <button
-                type="button"
-                onClick={() => {
-                  const hoyStr = new Date().toISOString().split('T')[0];
-                  setShowModalTurnoMostrador(true);
-                  handleMostradorDateChange(hoyStr);
-                }}
-                className="flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-red-600 hover:bg-red-700 active:scale-95 text-white font-heading font-black text-xs uppercase tracking-wider shadow-lg shadow-red-600/30 transition-all cursor-pointer shrink-0"
-              >
-                <PlusCircle className="w-4 h-4" />
-                <span>+ Cargar Turno Mostrador</span>
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    fetchTurnos();
+                    onShowToast('info', 'Actualizando...', 'Consultando turnos en Google Sheets.');
+                  }}
+                  disabled={loadingTurnos}
+                  className="flex items-center justify-center gap-1.5 px-3.5 py-3 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-800 font-heading font-bold text-xs uppercase tracking-wider transition-all cursor-pointer disabled:opacity-50"
+                  title="Actualizar lista de turnos desde Google Sheets"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loadingTurnos ? 'animate-spin text-red-500' : 'text-neutral-400'}`} />
+                  <span className="hidden sm:inline">Actualizar</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const hoyStr = new Date().toISOString().split('T')[0];
+                    setShowModalTurnoMostrador(true);
+                    handleMostradorDateChange(hoyStr);
+                  }}
+                  className="flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-red-600 hover:bg-red-700 active:scale-95 text-white font-heading font-black text-xs uppercase tracking-wider shadow-lg shadow-red-600/30 transition-all cursor-pointer"
+                >
+                  <PlusCircle className="w-4 h-4" />
+                  <span>+ Cargar Turno Mostrador</span>
+                </button>
+              </div>
             </div>
 
             {/* Turnos List */}
@@ -1726,44 +1742,49 @@ function doOptions(e) {
                   Histórico Todo
                 </button>
 
-                {/* Botón con almanaque para elegir fecha puntual */}
-                <div className="relative inline-flex items-center">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      try {
-                        datePickerRef.current?.showPicker?.();
-                      } catch {
-                        datePickerRef.current?.focus();
-                      }
-                    }}
-                    className={`px-3 py-1.5 rounded transition-all flex items-center gap-1.5 cursor-pointer ${
-                      filtroPeriodo === 'dia'
-                        ? 'bg-red-600 text-white font-black shadow-sm'
-                        : 'text-neutral-400 hover:text-white'
-                    }`}
-                    title="Hacer clic para abrir el almanaque y elegir una fecha puntual"
-                  >
-                    <Calendar className="w-3.5 h-3.5" />
-                    <span>
-                      {filtroPeriodo === 'dia' && fechaPersonalizada
-                        ? `Día: ${formatearFechaParaBoton(fechaPersonalizada)}`
-                        : 'Elegir Día 📅'}
-                    </span>
-                  </button>
+                {/* Selector de fecha puntual con almanaque */}
+                <div
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border transition-all ${
+                    filtroPeriodo === 'dia'
+                      ? 'bg-red-950/60 border-red-600 text-white shadow-sm ring-1 ring-red-600/50'
+                      : 'bg-neutral-900 border-neutral-700 text-neutral-300 hover:border-neutral-500'
+                  }`}
+                >
+                  <Calendar className="w-3.5 h-3.5 text-red-500 shrink-0" />
+                  <span className="text-[11px] font-heading font-bold uppercase text-neutral-400 shrink-0">
+                    Día:
+                  </span>
                   <input
-                    ref={datePickerRef}
                     type="date"
                     value={fechaPersonalizada}
                     onChange={(e) => {
-                      if (e.target.value) {
-                        setFechaPersonalizada(e.target.value);
+                      const val = e.target.value;
+                      setFechaPersonalizada(val);
+                      if (val) {
                         setFiltroPeriodo('dia');
                       }
                     }}
-                    className="absolute inset-0 opacity-0 pointer-events-auto cursor-pointer w-full h-full"
-                    title="Elegir día en el almanaque"
+                    onClick={(e) => {
+                      try {
+                        (e.currentTarget as any).showPicker?.();
+                      } catch {}
+                    }}
+                    className="bg-transparent text-xs text-white font-mono font-bold focus:outline-none cursor-pointer [color-scheme:dark]"
+                    title="Hacé clic para elegir un día en el almanaque"
                   />
+                  {filtroPeriodo === 'dia' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFiltroPeriodo('hoy');
+                        setFechaPersonalizada('');
+                      }}
+                      className="text-neutral-400 hover:text-white p-0.5 rounded hover:bg-red-900/50 ml-0.5 cursor-pointer"
+                      title="Quitar filtro de día y volver a Hoy"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1795,17 +1816,33 @@ function doOptions(e) {
                 </button>
               </div>
 
-              {/* Search in contabilidad */}
-              <div className="relative flex-1 min-w-[220px]">
-                <Search className="w-3.5 h-3.5 text-neutral-500 absolute left-3 top-3" />
-                <input
-                  id={busquedaContableId}
-                  type="text"
-                  placeholder="Filtrar por concepto o patente..."
-                  value={filtroBusquedaContable}
-                  onChange={(e) => setFiltroBusquedaContable(e.target.value)}
-                  className="w-full bg-[#111] border border-neutral-800 focus:border-red-600 focus:outline-none rounded-lg pl-8 pr-3 py-2 text-xs text-white placeholder-neutral-500"
-                />
+              {/* Search in contabilidad & Actualizar */}
+              <div className="flex items-center gap-2 flex-1 min-w-[260px]">
+                <div className="relative flex-1">
+                  <Search className="w-3.5 h-3.5 text-neutral-500 absolute left-3 top-3" />
+                  <input
+                    id={busquedaContableId}
+                    type="text"
+                    placeholder="Filtrar por concepto o patente..."
+                    value={filtroBusquedaContable}
+                    onChange={(e) => setFiltroBusquedaContable(e.target.value)}
+                    className="w-full bg-[#111] border border-neutral-800 focus:border-red-600 focus:outline-none rounded-lg pl-8 pr-3 py-2 text-xs text-white placeholder-neutral-500"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    fetchContabilidad();
+                    onShowToast('info', 'Actualizando...', 'Consultando contabilidad en Google Sheets.');
+                  }}
+                  disabled={loadingContabilidad}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-800 font-heading font-bold text-xs uppercase tracking-wider transition-all cursor-pointer shrink-0 disabled:opacity-50"
+                  title="Actualizar caja y movimientos desde Google Sheets"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loadingContabilidad ? 'animate-spin text-emerald-500' : 'text-neutral-400'}`} />
+                  <span className="hidden sm:inline">Actualizar</span>
+                </button>
               </div>
             </div>
 

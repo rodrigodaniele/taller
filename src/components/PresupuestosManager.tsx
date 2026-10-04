@@ -18,7 +18,8 @@ import {
   Calendar,
   Phone,
   User,
-  AlertCircle
+  AlertCircle,
+  RefreshCw
 } from 'lucide-react';
 import { Presupuesto, ItemPresupuesto, TurnoAdmin } from '../types';
 import { WORKSHOP_ITEMS, TRABAJOS_TALLER_SERVICIOS, REPUESTOS_TALLER_PIEZAS } from '../constants/workshopItems';
@@ -216,6 +217,30 @@ export const PresupuestosManager = ({
       onPresupuestosUpdated(presupuestos);
     }
   }, [presupuestos]);
+
+  const [refreshingPresupuestos, setRefreshingPresupuestos] = useState(false);
+
+  const handleRefreshPresupuestos = async () => {
+    setRefreshingPresupuestos(true);
+    try {
+      const res = await gasApi.getPresupuestos();
+      if (res && res.success && Array.isArray(res.presupuestos)) {
+        setPresupuestos(res.presupuestos);
+        if (onPresupuestosUpdated) {
+          onPresupuestosUpdated(res.presupuestos);
+        }
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(res.presupuestos));
+        onShowToast('success', 'Presupuestos actualizados', `Se sincronizaron ${res.presupuestos.length} presupuestos desde Google Sheets.`);
+      } else {
+        onShowToast('info', 'Presupuestos sincronizados', 'Los presupuestos ya están al día.');
+      }
+    } catch (err) {
+      console.warn('Error al actualizar presupuestos:', err);
+      onShowToast('error', 'Falla de conexión', 'No se pudieron consultar los presupuestos en Google Sheets.');
+    } finally {
+      setRefreshingPresupuestos(false);
+    }
+  };
 
   // If a turno was passed to quote directly from the Turnos tab
   useEffect(() => {
@@ -921,7 +946,18 @@ export const PresupuestosManager = ({
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleRefreshPresupuestos}
+              disabled={refreshingPresupuestos}
+              className="flex items-center gap-1.5 px-3.5 py-2.5 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white border border-neutral-700 font-heading font-bold text-xs uppercase tracking-wider transition-all cursor-pointer disabled:opacity-50"
+              title="Actualizar presupuestos desde Google Sheets"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshingPresupuestos ? 'animate-spin text-red-500' : 'text-neutral-400'}`} />
+              <span className="hidden sm:inline">Actualizar</span>
+            </button>
+
             <button
               type="button"
               onClick={() => iniciarNuevoPresupuesto()}
