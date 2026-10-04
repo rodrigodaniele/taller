@@ -59,7 +59,7 @@ export const ContactSection = () => {
               <p className="mt-3 text-sm text-neutral-300">
                 <strong>La Casa de la Dirección</strong>
                 <br />
-                General Alvear, Mendoza, Argentina.
+                Av. San Juan e Independencia, General Alvear, Mendoza.
               </p>
               <p className="mt-2 text-xs text-neutral-400 leading-relaxed">
                 Taller equipado con rampa de alineación computarizada y fosa técnica para atención ágil de autos y utilitarios.

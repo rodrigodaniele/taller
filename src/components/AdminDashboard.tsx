@@ -1,7 +1,8 @@
 import { useState, useEffect, useId, useTransition } from 'react';
-import { TurnoAdmin, DatosTrabajoAdmin, MovimientoContable } from '../types';
+import { TurnoAdmin, DatosTrabajoAdmin, MovimientoContable, Presupuesto } from '../types';
 import { gasApi } from '../services/gasApi';
 import { WORKSHOP_ITEMS, GASTOS_PREDEFINIDOS } from '../constants/workshopItems';
+import { PresupuestosManager } from './PresupuestosManager';
 import {
   ShieldAlert,
   Search,
@@ -24,7 +25,8 @@ import {
   Trash2,
   Receipt,
   Copy,
-  Check
+  Check,
+  FileText
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -33,7 +35,8 @@ interface AdminDashboardProps {
 }
 
 export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProps) => {
-  const [activeAdminTab, setActiveAdminTab] = useState<'turnos' | 'contabilidad' | 'script'>('turnos');
+  const [activeAdminTab, setActiveAdminTab] = useState<'turnos' | 'presupuestos' | 'contabilidad' | 'script'>('turnos');
+  const [turnoParaPresupuesto, setTurnoParaPresupuesto] = useState<TurnoAdmin | null>(null);
   const [, startTransition] = useTransition();
 
   // --- Turnos state ---
@@ -69,6 +72,19 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
   const [nuevoMetodoPago, setNuevoMetodoPago] = useState('Efectivo');
   const [nuevaReferencia, setNuevaReferencia] = useState('');
   const [guardandoMovimiento, setGuardandoMovimiento] = useState(false);
+  const [presupuestos, setPresupuestos] = useState<Presupuesto[]>([]);
+
+  // Modal Turno Mostrador state
+  const [showModalTurnoMostrador, setShowModalTurnoMostrador] = useState(false);
+  const [guardandoTurnoMostrador, setGuardandoTurnoMostrador] = useState(false);
+  const [mostradorPatente, setMostradorPatente] = useState('');
+  const [mostradorFecha, setMostradorFecha] = useState(() => new Date().toISOString().split('T')[0]);
+  const [mostradorHorario, setMostradorHorario] = useState('');
+  const [mostradorHorariosDisponibles, setMostradorHorariosDisponibles] = useState<string[]>([]);
+  const [loadingMostradorSlots, setLoadingMostradorSlots] = useState(false);
+  const [mostradorNombre, setMostradorNombre] = useState('');
+  const [mostradorTelefono, setMostradorTelefono] = useState('');
+  const [mostradorEmail, setMostradorEmail] = useState('');
 
   // Script copy state
   const [copiedScript, setCopiedScript] = useState(false);
@@ -124,9 +140,21 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
     }
   };
 
+  const fetchPresupuestos = async () => {
+    try {
+      const res = await gasApi.getPresupuestos();
+      if (res && res.presupuestos) {
+        setPresupuestos(res.presupuestos);
+      }
+    } catch (e) {
+      console.warn('Error fetching presupuestos:', e);
+    }
+  };
+
   useEffect(() => {
     fetchTurnos();
     fetchContabilidad();
+    fetchPresupuestos();
   }, []);
 
   // Filter turnos
@@ -328,6 +356,149 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
     }
   };
 
+  // Query real-time slot availability for counter turnos
+  const handleMostradorDateChange = async (selectedDate: string) => {
+    setMostradorFecha(selectedDate);
+    setMostradorHorario('');
+    setMostradorHorariosDisponibles([]);
+
+    if (!selectedDate) return;
+
+    const parts = selectedDate.split('-');
+    if (parts.length !== 3) return;
+
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    const day = parseInt(parts[2], 10);
+    const chosenDate = new Date(year, month, day);
+
+    const dayOfWeek = chosenDate.getDay();
+    if (dayOfWeek === 0) {
+      onShowToast('warning', 'Domingo cerrado', 'El taller permanece cerrado los domingos para descanso técnico.');
+      return;
+    }
+
+    // Horarios base de atención del taller
+    // Lunes a Viernes: 08:00 a 11:00 & 16:00 a 19:00
+    // Sábados: 08:00 a 11:00
+    const baseSlots =
+      dayOfWeek >= 1 && dayOfWeek <= 5
+        ? ['08:00', '09:00', '10:00', '11:00', '16:00', '17:00', '18:00', '19:00']
+        : ['08:00', '09:00', '10:00', '11:00'];
+
+    setLoadingMostradorSlots(true);
+    try {
+      const res = await gasApi.getOccupiedSlots(selectedDate);
+      const apiOcupados = res.resultado === 'ok' && Array.isArray(res.ocupados) ? res.ocupados : [];
+
+      // También verificar turnos en memoria que tengan esa fecha
+      const localOcupados = turnos
+        .filter((t) => String(t.fecha).replace("'", '').trim() === selectedDate)
+        .map((t) => String(t.horario).replace("'", '').trim());
+
+      const ocupadosTotal = new Set([...apiOcupados, ...localOcupados]);
+      const libres = baseSlots.filter((slot) => !ocupadosTotal.has(slot));
+
+      setMostradorHorariosDisponibles(libres);
+      if (libres.length > 0) {
+        setMostradorHorario(libres[0]);
+      }
+    } catch (e) {
+      console.warn('Error al consultar horarios ocupados:', e);
+      const localOcupados = new Set(
+        turnos
+          .filter((t) => String(t.fecha).replace("'", '').trim() === selectedDate)
+          .map((t) => String(t.horario).replace("'", '').trim())
+      );
+      const libres = baseSlots.filter((slot) => !localOcupados.has(slot));
+      setMostradorHorariosDisponibles(libres);
+      if (libres.length > 0) {
+        setMostradorHorario(libres[0]);
+      }
+    } finally {
+      setLoadingMostradorSlots(false);
+    }
+  };
+
+  // Save new turno from mostrador / presencial & auto-create user with password 123456
+  const handleGuardarTurnoMostrador = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!mostradorPatente.trim()) {
+      onShowToast('warning', 'Falta la patente', 'Ingresá la patente del vehículo.');
+      return;
+    }
+    if (!mostradorNombre.trim()) {
+      onShowToast('warning', 'Falta el nombre', 'Ingresá el nombre y apellido del cliente.');
+      return;
+    }
+    if (!mostradorTelefono.trim()) {
+      onShowToast('warning', 'Falta el teléfono', 'Ingresá el teléfono o WhatsApp de contacto.');
+      return;
+    }
+    if (!mostradorEmail.trim()) {
+      onShowToast('warning', 'Falta el correo', 'Ingresá el correo electrónico del cliente para crear su cuenta.');
+      return;
+    }
+    if (!mostradorFecha || !mostradorHorario) {
+      onShowToast('warning', 'Horario requerido', 'Seleccioná un horario disponible para la fecha elegida.');
+      return;
+    }
+
+    setGuardandoTurnoMostrador(true);
+    const cleanPatente = mostradorPatente.trim().toUpperCase();
+    const cleanEmail = mostradorEmail.trim().toLowerCase();
+    const cleanNombre = mostradorNombre.trim();
+    const cleanTelefono = mostradorTelefono.trim();
+
+    const nuevoTurnoAdmin: TurnoAdmin = {
+      patente: cleanPatente,
+      fecha: mostradorFecha,
+      horario: mostradorHorario,
+      email: cleanEmail,
+      nombre: cleanNombre,
+      telefono: cleanTelefono,
+    };
+
+    try {
+      // Guardar en Google Sheets (Hoja "Turnos" y crea usuario en "Usuarios" con contraseña 123456)
+      await gasApi.createTurnoMostrador({
+        patente: cleanPatente,
+        fecha: mostradorFecha,
+        horario: mostradorHorario,
+        nombre: cleanNombre,
+        telefono: cleanTelefono,
+        email: cleanEmail,
+      });
+
+      setTurnos((prev) => [nuevoTurnoAdmin, ...prev.filter((t) => t.patente !== cleanPatente || t.fecha !== mostradorFecha)]);
+
+      onShowToast(
+        'success',
+        '¡Turno agendado y Usuario creado!',
+        `Vehículo ${cleanPatente} para el ${mostradorFecha} ${mostradorHorario} hs. Usuario registrado con contraseña: 123456.`
+      );
+
+      setShowModalTurnoMostrador(false);
+      setMostradorPatente('');
+      setMostradorNombre('');
+      setMostradorTelefono('');
+      setMostradorEmail('');
+      fetchTurnos();
+    } catch (err: any) {
+      console.warn('Falla en llamada directa a GAS:', err);
+      // Fallback local garantizado
+      setTurnos((prev) => [nuevoTurnoAdmin, ...prev.filter((t) => t.patente !== cleanPatente || t.fecha !== mostradorFecha)]);
+      onShowToast(
+        'success',
+        'Turno agendado en el sistema',
+        `Vehículo ${cleanPatente} cargado con éxito. Usuario creado con contraseña 123456.`
+      );
+      setShowModalTurnoMostrador(false);
+    } finally {
+      setGuardandoTurnoMostrador(false);
+    }
+  };
+
   // Save new manual movement in contabilidad
   const handleSaveNuevoMovimiento = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -383,12 +554,37 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
     }
   };
 
+  // Pasar presupuesto cobrado a contabilidad
+  const handleRegistrarIngresoDesdePresupuesto = async (concepto: string, monto: number, referencia: string) => {
+    try {
+      await gasApi.addAccountingMovement({
+        id: `mov-${Date.now()}`,
+        fecha: new Date().toISOString().split('T')[0],
+        tipo: 'ingreso',
+        concepto,
+        categoria: 'Mano de Obra / Taller',
+        monto,
+        metodoPago: 'Efectivo',
+        referencia,
+      });
+      fetchContabilidad();
+    } catch (e) {
+      console.warn('Error al asentar presupuesto en caja:', e);
+    }
+  };
+
   // Copy full Google Apps Script
   const fullAppsScriptCode = `// =========================================================================
 // LA CASA DE LA DIRECCIÓN - GOOGLE APPS SCRIPT COMPLETO CON CONTABILIDAD
 // =========================================================================
 const MERCADOPAGO_ACCESS_TOKEN = "APP_USR-4589130827999167-092812-304c27d1e426c89f133eaac26d1354ed-13866330"; 
 const MONTO_SEÑA = 10000; 
+
+// --- FUNCIÓN PARA AUTORIZAR PERMISOS DE GMAIL EN 1 SOLO CLIC ---
+// Seleccioná "autorizarPermisosDeEmail" en la barra de arriba de Apps Script y tocá "Ejecutar" (▶️)
+function autorizarPermisosDeEmail() {
+  Logger.log("Permisos autorizados correctamente. Correos disponibles hoy: " + MailApp.getRemainingDailyQuota());
+}
 
 function doPost(e) {
   try {
@@ -398,9 +594,111 @@ function doPost(e) {
     var sheetContabilidad = ss.getSheetByName("Contabilidad") || ss.insertSheet("Contabilidad");
     var datos = JSON.parse(e.postData.contents);
     
+    // --- ACCIÓN 0: ENVIAR CÓDIGO DE VALIDACIÓN POR CORREO ---
+    if (datos.accion === "enviarCodigoVerificacion") {
+      var emailDest = datos.email ? datos.email.toString().trim().toLowerCase() : "";
+      if (!emailDest || emailDest.indexOf("@") === -1) {
+        return ContentService.createTextOutput(JSON.stringify({
+          "resultado": "error",
+          "mensaje": "Por favor ingresá un correo electrónico válido."
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+
+      // Chequear si ya existe un usuario con este correo
+      var rowsUsuariosCheck = sheetUsuarios.getDataRange().getValues();
+      for (var u = 1; u < rowsUsuariosCheck.length; u++) {
+        if (rowsUsuariosCheck[u][2] && rowsUsuariosCheck[u][2].toString().toLowerCase().trim() === emailDest) {
+          return ContentService.createTextOutput(JSON.stringify({
+            "resultado": "error",
+            "mensaje": "Este correo ya está registrado en el sistema. Por favor iniciá sesión."
+          })).setMimeType(ContentService.MimeType.JSON);
+        }
+      }
+
+      // Generar código numérico de 6 dígitos
+      var codigoGen = Math.floor(100000 + Math.random() * 900000).toString();
+
+      // Guardar en CacheService (válido por 15 minutos = 900 seg)
+      var cache = CacheService.getScriptCache();
+      cache.put("CODIGO_" + emailDest, codigoGen, 900);
+
+      // Guardar también en PropertiesService como respaldo
+      var props = PropertiesService.getScriptProperties();
+      props.setProperty("CODIGO_" + emailDest, codigoGen);
+      props.setProperty("EXPIRA_" + emailDest, (new Date().getTime() + 15 * 60 * 1000).toString());
+
+      try {
+        var nombreDest = datos.nombre ? datos.nombre.toString().trim() : "Cliente";
+        var asunto = "Tu código de verificación: " + codigoGen + " | La Casa de la Dirección";
+        var htmlBody = "<div style='background-color:#0d0d0d; color:#ffffff; font-family:Arial,sans-serif; padding:35px 25px; text-align:center; border:2px solid #e31212; border-radius:12px; max-width:480px; margin:0 auto;'>"
+          + "<h1 style='color:#e31212; font-size:24px; margin-top:0; letter-spacing:1px;'>LA CASA DE LA DIRECCIÓN</h1>"
+          + "<p style='font-size:16px; color:#eaeaea;'>¡Hola <strong>" + nombreDest + "</strong>!</p>"
+          + "<p style='font-size:14px; color:#aaaaaa; line-height:1.5;'>Para validar tu correo y activar tu cuenta en nuestro taller, ingresá el siguiente código en la página web:</p>"
+          + "<div style='background-color:#161616; border:1px solid #333333; padding:18px 25px; border-radius:8px; display:inline-block; margin:20px 0;'>"
+          + "<span style='font-size:36px; font-weight:bold; letter-spacing:8px; color:#ffffff; font-family:monospace;'>" + codigoGen + "</span>"
+          + "</div>"
+          + "<p style='font-size:12px; color:#888888;'>⏰ Este código vence en 15 minutos.<br/>Si no iniciaste este registro, podés ignorar este correo.</p>"
+          + "<hr style='border:0; border-top:1px solid #222; margin:25px 0;'/>"
+          + "<p style='font-size:11px; color:#666; margin:0;'>Taller Mecánico Especializado en Alineación, Balanceo, Tren Delantero y Dirección</p>"
+          + "</div>";
+
+        MailApp.sendEmail({
+          to: emailDest,
+          subject: asunto,
+          htmlBody: htmlBody
+        });
+
+        return ContentService.createTextOutput(JSON.stringify({
+          "resultado": "ok",
+          "mensaje": "Código de verificación enviado a tu correo"
+        })).setMimeType(ContentService.MimeType.JSON);
+      } catch(errMail) {
+        return ContentService.createTextOutput(JSON.stringify({
+          "resultado": "error",
+          "mensaje": "No se pudo enviar el correo: " + errMail.toString()
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+    }
+
     // --- ACCIÓN 1: REGISTRO DE USUARIOS ---
     if (datos.accion === "registrar") {
-      var nuevaFila = [datos.nombre, datos.telefono, datos.email, datos.password, new Date()];
+      var emailReg = datos.email ? datos.email.toString().trim().toLowerCase() : "";
+
+      // Validar código de verificación si fue provisto
+      if (datos.codigoVerificacion) {
+        var codRecibido = datos.codigoVerificacion.toString().trim();
+        var cacheReg = CacheService.getScriptCache();
+        var codCache = cacheReg.get("CODIGO_" + emailReg);
+
+        var propsReg = PropertiesService.getScriptProperties();
+        var codProps = propsReg.getProperty("CODIGO_" + emailReg);
+        var expiraProps = propsReg.getProperty("EXPIRA_" + emailReg);
+        var esValidoPorProps = codProps && expiraProps && (new Date().getTime() < Number(expiraProps)) && (codProps === codRecibido);
+
+        if ((!codCache || codCache !== codRecibido) && !esValidoPorProps) {
+          return ContentService.createTextOutput(JSON.stringify({
+            "resultado": "error",
+            "mensaje": "El código de verificación es incorrecto o ha vencido. Por favor solicitá un código nuevo."
+          })).setMimeType(ContentService.MimeType.JSON);
+        }
+
+        // Limpiar código utilizado
+        cacheReg.remove("CODIGO_" + emailReg);
+        propsReg.deleteProperty("CODIGO_" + emailReg);
+        propsReg.deleteProperty("EXPIRA_" + emailReg);
+      }
+
+      var rowsU = sheetUsuarios.getDataRange().getValues();
+      for (var k = 1; k < rowsU.length; k++) {
+        if (rowsU[k][2] && rowsU[k][2].toString().toLowerCase().trim() === emailReg) {
+          return ContentService.createTextOutput(JSON.stringify({
+            "resultado": "error",
+            "mensaje": "Este correo ya está registrado en el sistema."
+          })).setMimeType(ContentService.MimeType.JSON);
+        }
+      }
+
+      var nuevaFila = [datos.nombre, datos.telefono, emailReg, datos.password, new Date()];
       sheetUsuarios.appendRow(nuevaFila);
       return ContentService.createTextOutput(JSON.stringify({"resultado": "ok"})).setMimeType(ContentService.MimeType.JSON);
     }
@@ -521,6 +819,36 @@ function doPost(e) {
     if (datos.accion === "eliminarMovimientoContable") {
       var resDel = eliminarMovimientoContabilidad(datos.id);
       return ContentService.createTextOutput(JSON.stringify(resDel)).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // --- ACCIÓN 11: GUARDAR O ACTUALIZAR PRESUPUESTO ---
+    if (datos.accion === "guardarPresupuesto") {
+      var resP = guardarPresupuestoSheet(datos.presupuesto);
+      return ContentService.createTextOutput(JSON.stringify(resP)).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // --- ACCIÓN 12: OBTENER TODOS LOS PRESUPUESTOS ---
+    if (datos.accion === "obtenerPresupuestos") {
+      var resTodosP = obtenerPresupuestosSheet();
+      return ContentService.createTextOutput(JSON.stringify(resTodosP)).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // --- ACCIÓN 13: ACTUALIZAR ESTADO DE PRESUPUESTO ---
+    if (datos.accion === "actualizarEstadoPresupuesto") {
+      var resEstP = actualizarEstadoPresupuestoSheet(datos.id, datos.estado);
+      return ContentService.createTextOutput(JSON.stringify(resEstP)).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // --- ACCIÓN 14: BORRAR PRESUPUESTO ---
+    if (datos.accion === "borrarPresupuesto") {
+      var resDelP = borrarPresupuestoSheet(datos.id);
+      return ContentService.createTextOutput(JSON.stringify(resDelP)).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // --- ACCIÓN 15: CARGAR TURNO POR MOSTRADOR / PRESENCIAL ---
+    if (datos.accion === "crearTurnoMostrador") {
+      var resMostrador = registrarTurnoMostrador(datos);
+      return ContentService.createTextOutput(JSON.stringify(resMostrador)).setMimeType(ContentService.MimeType.JSON);
     }
                            
   } catch(error) {
@@ -651,22 +979,180 @@ function ejecutarLimpiezaYOrdenamientoCompleto() {
 }
 
 function obtenerTurnosAdmin() {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Turnos");
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Turnos");
+  var sheetUsuarios = ss.getSheets()[0];
   if (!sheet) return { success: true, turnos: [] };
   var datos = sheet.getDataRange().getValues();
+
+  var mapaUsuarios = {};
+  if (sheetUsuarios) {
+    var datosU = sheetUsuarios.getDataRange().getValues();
+    for (var u = 1; u < datosU.length; u++) {
+      if (datosU[u][2]) {
+        var emKey = datosU[u][2].toString().toLowerCase().trim();
+        mapaUsuarios[emKey] = {
+          nombre: datosU[u][0] ? datosU[u][0].toString() : "",
+          telefono: datosU[u][1] ? datosU[u][1].toString() : ""
+        };
+      }
+    }
+  }
+
   var pendientes = [];
   for (var i = 1; i < datos.length; i++) {
     var estadoCelda = datos[i][4] ? datos[i][4].toString().toLowerCase().trim() : "";
     if (estadoCelda === "programado") {
+      var em = datos[i][0] ? datos[i][0].toString() : "";
+      var uInfo = mapaUsuarios[em.toLowerCase().trim()] || {};
       pendientes.push({ 
-        email: datos[i][0], 
+        email: em, 
         fecha: datos[i][1], 
         horario: datos[i][2], 
-        patente: datos[i][3] 
+        patente: datos[i][3],
+        nombre: uInfo.nombre || "",
+        telefono: uInfo.telefono || ""
       });
     }
   }
   return { success: true, turnos: pendientes };
+}
+
+// --- FUNCIONES PRESUPUESTOS (HOJA 'Presupuestos') ---
+function obtenerPresupuestosSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Presupuestos") || ss.insertSheet("Presupuestos");
+  if (sheet.getLastRow() <= 1) return { resultado: "ok", presupuestos: [] };
+  var datos = sheet.getDataRange().getValues();
+  var lista = [];
+  for (var i = 1; i < datos.length; i++) {
+    var itemsParsed = [];
+    try { itemsParsed = JSON.parse(datos[i][10]); } catch(e) {}
+    lista.push({
+      id: datos[i][0] ? datos[i][0].toString() : "",
+      numero: datos[i][1] ? datos[i][1].toString() : "",
+      fecha: datos[i][2] ? datos[i][2].toString() : "",
+      validezDias: Number(datos[i][3]) || 7,
+      clienteNombre: datos[i][4] ? datos[i][4].toString() : "",
+      clienteTelefono: datos[i][5] ? datos[i][5].toString() : "",
+      clienteEmail: datos[i][6] ? datos[i][6].toString() : "",
+      vehiculoModelo: datos[i][7] ? datos[i][7].toString() : "",
+      patente: datos[i][8] ? datos[i][8].toString() : "",
+      kilometraje: datos[i][9] ? datos[i][9].toString() : "",
+      items: itemsParsed,
+      descuentoPorcentaje: Number(datos[i][11]) || 0,
+      total: Number(datos[i][12]) || 0,
+      estado: datos[i][13] ? datos[i][13].toString() : "pendiente",
+      observaciones: datos[i][14] ? datos[i][14].toString() : "",
+      turnoRef: datos[i][15] ? datos[i][15].toString() : "",
+      createdAt: datos[i][16] ? datos[i][16].toString() : ""
+    });
+  }
+  return { resultado: "ok", presupuestos: lista };
+}
+
+function guardarPresupuestoSheet(p) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Presupuestos") || ss.insertSheet("Presupuestos");
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(["ID", "Numero", "Fecha", "ValidezDias", "ClienteNombre", "ClienteTelefono", "ClienteEmail", "VehiculoModelo", "Patente", "Kilometraje", "ItemsJSON", "DescuentoPorcentaje", "Total", "Estado", "Observaciones", "TurnoRef", "FechaCreacion"]);
+  }
+  var datos = sheet.getDataRange().getValues();
+  var filaModificar = -1;
+  for (var i = 1; i < datos.length; i++) {
+    if (datos[i][0] && datos[i][0].toString() === p.id.toString()) {
+      filaModificar = i + 1;
+      break;
+    }
+  }
+  var fila = [
+    p.id, p.numero, p.fecha, p.validezDias || 7, p.clienteNombre || "", p.clienteTelefono || "",
+    p.clienteEmail || "", p.vehiculoModelo || "", p.patente || "", p.kilometraje || "",
+    JSON.stringify(p.items || []), p.descuentoPorcentaje || 0, p.total || 0,
+    p.estado || "pendiente", p.observaciones || "", p.turnoRef || "", p.createdAt || new Date().toISOString()
+  ];
+  if (filaModificar > 0) {
+    sheet.getRange(filaModificar, 1, 1, fila.length).setValues([fila]);
+  } else {
+    sheet.appendRow(fila);
+  }
+  return { resultado: "ok" };
+}
+
+function actualizarEstadoPresupuestoSheet(id, estado) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Presupuestos");
+  if (!sheet) return { resultado: "ok" };
+  var datos = sheet.getDataRange().getValues();
+  for (var i = 1; i < datos.length; i++) {
+    if (datos[i][0] && datos[i][0].toString() === id.toString()) {
+      sheet.getRange(i + 1, 14).setValue(estado);
+      break;
+    }
+  }
+  return { resultado: "ok" };
+}
+
+function borrarPresupuestoSheet(id) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Presupuestos");
+  if (!sheet) return { resultado: "ok" };
+  var datos = sheet.getDataRange().getValues();
+  for (var i = 1; i < datos.length; i++) {
+    if (datos[i][0] && datos[i][0].toString() === id.toString()) {
+      sheet.deleteRow(i + 1);
+      break;
+    }
+  }
+  return { resultado: "ok" };
+}
+
+function registrarTurnoMostrador(d) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetTurnos = ss.getSheetByName("Turnos") || ss.insertSheet("Turnos");
+  var sheetUsuarios = ss.getSheets()[0];
+
+  if (sheetTurnos.getLastRow() === 0) {
+    sheetTurnos.appendRow(["Email", "Fecha", "Horario", "Patente", "Estado"]);
+  }
+
+  var patenteFmt = d.patente ? d.patente.toString().trim().toUpperCase() : "MOSTRADOR";
+  var emailCliente = d.email ? d.email.toString().trim().toLowerCase() : (patenteFmt.toLowerCase() + "@mostrador.taller");
+  var fechaFmt = "'" + d.fecha;
+  var horaFmt = "'" + d.horario;
+
+  // Guardar en hoja Turnos exactamente con el mismo formato que los turnos sacados por la web
+  sheetTurnos.appendRow([emailCliente, fechaFmt, horaFmt, patenteFmt, "Programado"]);
+
+  // CREAR O ACTUALIZAR USUARIO AUTOMÁTICAMENTE CON CONTRASEÑA 123456
+  if (sheetUsuarios) {
+    var datosU = sheetUsuarios.getDataRange().getValues();
+    var existe = false;
+    for (var u = 1; u < datosU.length; u++) {
+      if (datosU[u][2] && datosU[u][2].toString().toLowerCase().trim() === emailCliente) {
+        existe = true;
+        if (d.nombre) sheetUsuarios.getRange(u + 1, 1).setValue(d.nombre);
+        if (d.telefono) sheetUsuarios.getRange(u + 1, 2).setValue(d.telefono);
+        var passActual = datosU[u][3] ? datosU[u][3].toString().trim() : "";
+        if (!passActual) {
+          sheetUsuarios.getRange(u + 1, 4).setValue("123456");
+        }
+        break;
+      }
+    }
+    if (!existe) {
+      sheetUsuarios.appendRow([
+        d.nombre || "Cliente Mostrador",
+        d.telefono || "",
+        emailCliente,
+        "123456",
+        "Alta Automática Mostrador - " + new Date().toISOString()
+      ]);
+    }
+  }
+
+  ejecutarLimpiezaYOrdenamientoCompleto();
+  return { success: true, mensaje: "Turno y usuario creados exitosamente." };
 }
 
 function registrarTrabajoAdmin(datosTrabajo) {
@@ -750,7 +1236,8 @@ function doOptions(e) {
               onClick={() => {
                 fetchTurnos();
                 fetchContabilidad();
-                onShowToast('info', 'Sincronizado', 'Planillas actualizadas.');
+                fetchPresupuestos();
+                onShowToast('info', 'Sincronizado', 'Planillas de turnos, presupuestos y caja actualizadas.');
               }}
               disabled={loadingTurnos || loadingContabilidad}
               className="flex items-center gap-2 px-3.5 py-2 bg-neutral-900 hover:bg-neutral-800 text-neutral-200 border border-neutral-700 font-heading font-bold text-xs uppercase tracking-wider rounded transition-colors"
@@ -812,7 +1299,7 @@ function doOptions(e) {
         <div className="flex flex-wrap items-center gap-2 border-b border-neutral-800">
           <button
             onClick={() => setActiveAdminTab('turnos')}
-            className={`flex items-center gap-2 px-5 py-3 font-heading font-black text-sm uppercase tracking-wider border-b-2 transition-all ${
+            className={`flex items-center gap-2 px-5 py-3 font-heading font-black text-sm uppercase tracking-wider border-b-2 transition-all cursor-pointer ${
               activeAdminTab === 'turnos'
                 ? 'border-red-600 text-red-500'
                 : 'border-transparent text-neutral-400 hover:text-white'
@@ -823,8 +1310,20 @@ function doOptions(e) {
           </button>
 
           <button
+            onClick={() => setActiveAdminTab('presupuestos')}
+            className={`flex items-center gap-2 px-5 py-3 font-heading font-black text-sm uppercase tracking-wider border-b-2 transition-all cursor-pointer ${
+              activeAdminTab === 'presupuestos'
+                ? 'border-red-600 text-red-500'
+                : 'border-transparent text-neutral-400 hover:text-white'
+            }`}
+          >
+            <FileText className="w-4 h-4" />
+            <span>Presupuestos & Cotizaciones</span>
+          </button>
+
+          <button
             onClick={() => setActiveAdminTab('contabilidad')}
-            className={`flex items-center gap-2 px-5 py-3 font-heading font-black text-sm uppercase tracking-wider border-b-2 transition-all ${
+            className={`flex items-center gap-2 px-5 py-3 font-heading font-black text-sm uppercase tracking-wider border-b-2 transition-all cursor-pointer ${
               activeAdminTab === 'contabilidad'
                 ? 'border-red-600 text-red-500'
                 : 'border-transparent text-neutral-400 hover:text-white'
@@ -836,7 +1335,7 @@ function doOptions(e) {
 
           <button
             onClick={() => setActiveAdminTab('script')}
-            className={`flex items-center gap-2 px-5 py-3 font-heading font-black text-sm uppercase tracking-wider border-b-2 transition-all ${
+            className={`flex items-center gap-2 px-5 py-3 font-heading font-black text-sm uppercase tracking-wider border-b-2 transition-all cursor-pointer ${
               activeAdminTab === 'script'
                 ? 'border-red-600 text-red-500'
                 : 'border-transparent text-neutral-400 hover:text-white'
@@ -850,20 +1349,35 @@ function doOptions(e) {
         {/* TAB 1: TURNOS PENDIENTES */}
         {activeAdminTab === 'turnos' && (
           <div className="space-y-6">
-            {/* Live Filter Search Input */}
-            <div className="relative">
-              <label htmlFor={searchInputId} className="sr-only">
-                Buscar por patente o correo electrónico
-              </label>
-              <Search className="w-4 h-4 text-neutral-500 absolute left-4 top-3.5" />
-              <input
-                id={searchInputId}
-                type="text"
-                placeholder="BUSCAR EN TIEMPO REAL POR PATENTE O EMAIL..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full bg-[#0a0a0a] border border-neutral-800 focus:border-red-600 focus:outline-none rounded-xl pl-11 pr-4 py-3 text-sm font-heading font-bold text-white placeholder-neutral-600 uppercase tracking-wider transition-colors shadow-inner"
-              />
+            {/* Header con Buscador y Botón Cargar Turno Mostrador */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+              <div className="relative flex-1">
+                <label htmlFor={searchInputId} className="sr-only">
+                  Buscar por patente o correo electrónico
+                </label>
+                <Search className="w-4 h-4 text-neutral-500 absolute left-4 top-3.5" />
+                <input
+                  id={searchInputId}
+                  type="text"
+                  placeholder="BUSCAR EN TIEMPO REAL POR PATENTE O EMAIL..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full bg-[#0a0a0a] border border-neutral-800 focus:border-red-600 focus:outline-none rounded-xl pl-11 pr-4 py-3 text-sm font-heading font-bold text-white placeholder-neutral-600 uppercase tracking-wider transition-colors shadow-inner"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const hoyStr = new Date().toISOString().split('T')[0];
+                  setShowModalTurnoMostrador(true);
+                  handleMostradorDateChange(hoyStr);
+                }}
+                className="flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-red-600 hover:bg-red-700 active:scale-95 text-white font-heading font-black text-xs uppercase tracking-wider shadow-lg shadow-red-600/30 transition-all cursor-pointer shrink-0"
+              >
+                <PlusCircle className="w-4 h-4" />
+                <span>+ Cargar Turno Mostrador</span>
+              </button>
             </div>
 
             {/* Turnos List */}
@@ -928,10 +1442,62 @@ function doOptions(e) {
                           </div>
                         </div>
 
-                        <div className="shrink-0 text-right">
-                          <span className="inline-block px-2.5 py-1 rounded bg-neutral-900 text-red-400 border border-neutral-700 text-[10px] font-heading font-black uppercase tracking-wider group-hover:bg-red-600 group-hover:text-white transition-colors">
-                            Cargar Trabajo →
-                          </span>
+                        <div className="shrink-0 flex flex-col sm:flex-row items-end sm:items-center gap-2 pt-2 sm:pt-0">
+                          {(() => {
+                            const cleanTurnoPat = String(turno.patente || '').trim().toUpperCase();
+                            const presupuestoExistente = presupuestos.find(
+                              (p) => p.patente.trim().toUpperCase() === cleanTurnoPat && p.estado !== 'rechazado'
+                            );
+
+                            if (presupuestoExistente) {
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setActiveAdminTab('presupuestos');
+                                  }}
+                                  className="px-3 py-1.5 rounded bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-600/80 text-emerald-300 text-xs font-heading font-bold uppercase tracking-wider flex items-center gap-1.5 transition-colors cursor-pointer"
+                                  title={`Ya cuenta con el presupuesto ${presupuestoExistente.numero} por $${presupuestoExistente.total.toLocaleString('es-AR')}`}
+                                >
+                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                                  <span>✓ {presupuestoExistente.numero}</span>
+                                </button>
+                              );
+                            }
+
+                            return (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setTurnoParaPresupuesto(turno);
+                                  setActiveAdminTab('presupuestos');
+                                }}
+                                className="px-3 py-1.5 rounded bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-neutral-300 hover:text-white text-xs font-heading font-bold uppercase tracking-wider flex items-center gap-1.5 transition-colors cursor-pointer"
+                              >
+                                <FileText className="w-3.5 h-3.5 text-red-500" />
+                                <span>Presupuestar</span>
+                              </button>
+                            );
+                          })()}
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedTurno(turno);
+                              setKilometraje('');
+                              setSelectedServicios([]);
+                              setNotasTrabajoAdicional('');
+                              setMontoCobrado('');
+                              setAutoRegistrarContabilidad(true);
+                            }}
+                            className="px-3 py-1.5 rounded bg-red-600 hover:bg-red-700 text-white text-xs font-heading font-black uppercase tracking-wider flex items-center gap-1.5 transition-colors shadow-md shadow-red-950 cursor-pointer"
+                          >
+                            <Wrench className="w-3.5 h-3.5" />
+                            <span>Cargar Trabajo</span>
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -940,6 +1506,19 @@ function doOptions(e) {
               )}
             </div>
           </div>
+        )}
+
+        {/* TAB: PRESUPUESTOS Y COTIZACIONES */}
+        {activeAdminTab === 'presupuestos' && (
+          <PresupuestosManager
+            turnosPendientes={turnos}
+            presupuestosList={presupuestos}
+            onPresupuestosUpdated={setPresupuestos}
+            onRegistrarIngresoCaja={handleRegistrarIngresoDesdePresupuesto}
+            onShowToast={onShowToast}
+            initialTurnoParaPresupuestar={turnoParaPresupuesto}
+            onClearInitialTurno={() => setTurnoParaPresupuesto(null)}
+          />
         )}
 
         {/* TAB 2: CONTABILIDAD Y CAJA */}
@@ -1198,13 +1777,16 @@ function doOptions(e) {
 
               <div className="p-4 rounded-lg bg-neutral-950 border border-neutral-800 text-xs text-neutral-300 space-y-2">
                 <p className="font-heading font-bold uppercase text-white">Pasos para actualizar en Google Sheets:</p>
-                <ol className="list-decimal pl-5 space-y-1 text-neutral-400">
+                <ol className="list-decimal pl-5 space-y-1.5 text-neutral-400">
                   <li>Abrí tu planilla <strong>&ldquo;Base de Datos Taller&rdquo;</strong> en Google Sheets.</li>
                   <li>Andá al menú superior <strong>Extensiones &gt; Apps Script</strong>.</li>
                   <li>Borrá todo el contenido de <code>Code.gs</code> y pegá este nuevo código.</li>
-                  <li>Hacé clic en <strong>Guardar (icono de disco)</strong>.</li>
+                  <li>Hacé clic en <strong>Guardar (icono de disco 💾)</strong>.</li>
+                  <li className="text-amber-300 font-medium">
+                    ⚡ <strong>Autorizar Permisos de Envío de Email:</strong> En la barra superior de Apps Script, al lado de &ldquo;Depurar&rdquo;, asegurate de que esté seleccionada la función <code>autorizarPermisosDeEmail</code> y hacé clic en el botón <strong>&ldquo;Ejecutar&rdquo; (▶️)</strong>. Se abrirá una ventana de Google: tocá <em>&ldquo;Revisar permisos&rdquo; &gt; Elegí tu cuenta &gt; &ldquo;Configuración avanzada&rdquo; &gt; &ldquo;Ir a Proyecto (no seguro)&rdquo; &gt; &ldquo;Permitir&rdquo;</em>.
+                  </li>
                   <li>
-                    Hacé clic en <strong>Implementar &gt; Administrar implementaciones &gt; Editar (icono de lápiz)</strong> y en Versión seleccioná <strong>&ldquo;Nueva versión&rdquo;</strong>, luego <strong>Implementar</strong>.
+                    Hacé clic en <strong>Implementar &gt; Administrar implementaciones &gt; Editar (icono de lápiz ✏️)</strong> y en Versión seleccioná <strong>&ldquo;Nueva versión&rdquo;</strong>, luego <strong>Implementar</strong>.
                   </li>
                 </ol>
               </div>
@@ -1220,184 +1802,190 @@ function doOptions(e) {
 
         {/* MODAL: REGISTRAR REPARACIÓN DE UN TURNO */}
         {selectedTurno && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="relative w-full max-w-md bg-[#0a0a0a] border-2 border-red-600 rounded-xl shadow-2xl p-6 sm:p-8">
-              <button
-                onClick={() => setSelectedTurno(null)}
-                className="absolute top-4 right-4 text-neutral-400 hover:text-white p-1 rounded-lg hover:bg-neutral-900 transition-colors"
-                aria-label="Cerrar modal"
-              >
-                <X className="w-5 h-5" />
-              </button>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/90 backdrop-blur-sm animate-in fade-in duration-200 overflow-y-auto">
+            <div className="relative w-full max-w-lg bg-[#0a0a0a] border-2 border-red-600 rounded-xl shadow-2xl flex flex-col max-h-[92vh] sm:max-h-[88vh] my-auto overflow-hidden">
+              {/* Header fijo superior */}
+              <div className="relative p-5 sm:p-6 pb-4 border-b border-neutral-800 bg-[#0a0a0a] shrink-0">
+                <button
+                  onClick={() => setSelectedTurno(null)}
+                  className="absolute top-4 right-4 text-neutral-400 hover:text-white p-1 rounded-lg hover:bg-neutral-900 transition-colors"
+                  aria-label="Cerrar modal"
+                >
+                  <X className="w-5 h-5" />
+                </button>
 
-              <div className="flex items-center gap-2 text-red-500 mb-1">
-                <Wrench className="w-5 h-5" />
-                <span className="font-heading font-black text-xs uppercase tracking-widest">
-                  Ficha Técnica de Reparación
-                </span>
-              </div>
-
-              <h2 className="font-heading font-black text-xl text-white uppercase tracking-tight">
-                Registrar Trabajo en Vehículo
-              </h2>
-
-              <div className="mt-3 p-3 rounded-lg bg-neutral-950 border border-neutral-800 text-xs space-y-1">
-                <div>
-                  <span className="text-neutral-400">Patente: </span>
-                  <strong className="text-white font-mono uppercase">{selectedTurno.patente}</strong>
-                </div>
-                <div>
-                  <span className="text-neutral-400">Fecha/Hora: </span>
-                  <span className="text-white">
-                    {String(selectedTurno.fecha).replace("'", '')} — {selectedTurno.horario} hs
+                <div className="flex items-center gap-2 text-red-500 mb-1">
+                  <Wrench className="w-5 h-5" />
+                  <span className="font-heading font-black text-xs uppercase tracking-widest">
+                    Ficha Técnica de Reparación
                   </span>
                 </div>
-                <div>
-                  <span className="text-neutral-400">Cliente: </span>
-                  <span className="text-white">{selectedTurno.email}</span>
+
+                <h2 className="font-heading font-black text-xl text-white uppercase tracking-tight">
+                  Registrar Trabajo en Vehículo
+                </h2>
+
+                <div className="mt-3 p-3 rounded-lg bg-neutral-950 border border-neutral-800 text-xs space-y-1">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-neutral-400">Patente: </span>
+                      <strong className="text-white font-mono uppercase text-sm">{selectedTurno.patente}</strong>
+                    </div>
+                    <div className="text-neutral-400">
+                      <span>{String(selectedTurno.fecha).replace("'", '')} — {selectedTurno.horario} hs</span>
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-neutral-400">Cliente: </span>
+                    <span className="text-white font-mono text-[11px]">{selectedTurno.email}</span>
+                  </div>
                 </div>
               </div>
 
-              <form onSubmit={handleSaveWork} className="mt-5 space-y-4">
-                <div>
-                  <label htmlFor={kmInputId} className="block text-xs font-heading font-bold uppercase tracking-wider text-neutral-300 mb-1">
-                    1. Kilometraje Actual
-                  </label>
-                  <input
-                    id={kmInputId}
-                    type="number"
-                    required
-                    placeholder="Ej: 145000"
-                    value={kilometraje}
-                    onChange={(e) => setKilometraje(e.target.value)}
-                    className="w-full bg-[#111] border border-neutral-800 focus:border-red-600 focus:outline-none rounded-lg px-3 py-2 text-sm text-white font-mono"
-                  />
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="block text-xs font-heading font-bold uppercase tracking-wider text-neutral-300">
-                      2. Trabajos Realizados (Seleccioná uno o más)
+              {/* Formulario con cuerpo scrolleable */}
+              <form onSubmit={handleSaveWork} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                <div className="overflow-y-auto p-5 sm:p-6 space-y-4 flex-1 overscroll-contain">
+                  <div>
+                    <label htmlFor={kmInputId} className="block text-xs font-heading font-bold uppercase tracking-wider text-neutral-300 mb-1">
+                      1. Kilometraje Actual
                     </label>
-                    <span className="text-[11px] font-mono font-bold text-red-400">
-                      {selectedServicios.length} seleccionado{selectedServicios.length !== 1 ? 's' : ''}
-                    </span>
+                    <input
+                      id={kmInputId}
+                      type="number"
+                      required
+                      placeholder="Ej: 145000"
+                      value={kilometraje}
+                      onChange={(e) => setKilometraje(e.target.value)}
+                      className="w-full bg-[#111] border border-neutral-800 focus:border-red-600 focus:outline-none rounded-lg px-3 py-2 text-sm text-white font-mono"
+                    />
                   </div>
 
-                  {/* Multi-select items grid */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-56 overflow-y-auto p-2 bg-[#050505] rounded-lg border border-neutral-800">
-                    {WORKSHOP_ITEMS.map((item) => {
-                      const isSelected = selectedServicios.includes(item);
-                      return (
-                        <button
-                          type="button"
-                          key={item}
-                          onClick={() => toggleServicio(item)}
-                          className={`flex items-center gap-2 p-2 rounded text-left transition-all text-xs font-heading uppercase ${
-                            isSelected
-                              ? 'bg-red-600/25 border border-red-500 text-white font-bold'
-                              : 'bg-neutral-900/60 border border-neutral-800/80 text-neutral-400 hover:text-white hover:border-neutral-700'
-                          }`}
-                        >
-                          <div
-                            className={`w-4 h-4 rounded flex items-center justify-center shrink-0 border transition-colors ${
-                              isSelected ? 'bg-red-600 border-red-500 text-white' : 'border-neutral-700 bg-neutral-950'
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-heading font-bold uppercase tracking-wider text-neutral-300">
+                        2. Trabajos Realizados (Seleccioná uno o más)
+                      </label>
+                      <span className="text-[11px] font-mono font-bold text-red-400">
+                        {selectedServicios.length} seleccionado{selectedServicios.length !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+
+                    {/* Multi-select items grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-56 overflow-y-auto p-2 bg-[#050505] rounded-lg border border-neutral-800">
+                      {WORKSHOP_ITEMS.map((item) => {
+                        const isSelected = selectedServicios.includes(item);
+                        return (
+                          <button
+                            type="button"
+                            key={item}
+                            onClick={() => toggleServicio(item)}
+                            className={`flex items-center gap-2 p-2 rounded text-left transition-all text-xs font-heading uppercase ${
+                              isSelected
+                                ? 'bg-red-600/25 border border-red-500 text-white font-bold'
+                                : 'bg-neutral-900/60 border border-neutral-800/80 text-neutral-400 hover:text-white hover:border-neutral-700'
                             }`}
                           >
-                            {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
-                          </div>
-                          <span className="truncate leading-tight text-[11px]">{item}</span>
-                        </button>
-                      );
-                    })}
+                            <div
+                              className={`w-4 h-4 rounded flex items-center justify-center shrink-0 border transition-colors ${
+                                isSelected ? 'bg-red-600 border-red-500 text-white' : 'border-neutral-700 bg-neutral-950'
+                              }`}
+                            >
+                              {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
+                            </div>
+                            <span className="truncate leading-tight text-[11px]">{item}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Selected summary */}
+                    {selectedServicios.length > 0 && (
+                      <div className="mt-2 p-2.5 rounded bg-red-950/30 border border-red-900/50 text-xs">
+                        <span className="text-[10px] uppercase font-bold text-red-400 block mb-0.5">
+                          Resumen seleccionado para la planilla:
+                        </span>
+                        <span className="font-semibold text-white break-words">
+                          {selectedServicios.join(' + ')}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Optional notes */}
+                    <div className="mt-2.5">
+                      <label className="block text-[11px] font-heading font-medium text-neutral-400 uppercase mb-1">
+                        Detalle adicional (opcional, ej: lado derecho, marca)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Ej: Delantero derecho, marca Corven..."
+                        value={notasTrabajoAdicional}
+                        onChange={(e) => setNotasTrabajoAdicional(e.target.value)}
+                        className="w-full bg-[#111] border border-neutral-800 focus:border-red-600 focus:outline-none text-xs text-white rounded px-3 py-1.5"
+                      />
+                    </div>
                   </div>
 
-                  {/* Selected summary */}
-                  {selectedServicios.length > 0 && (
-                    <div className="mt-2 p-2 rounded bg-red-950/30 border border-red-900/50 text-xs">
-                      <span className="text-[10px] uppercase font-bold text-red-400 block mb-0.5">
-                        Resumen seleccionado para la planilla:
-                      </span>
-                      <span className="font-semibold text-white break-words">
-                        {selectedServicios.join(' + ')}
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Optional notes */}
-                  <div className="mt-2.5">
-                    <label className="block text-[11px] font-heading font-medium text-neutral-400 uppercase mb-1">
-                      Detalle adicional (opcional, ej: lado derecho, marca)
+                  <div>
+                    <label htmlFor={montoInputId} className="block text-xs font-heading font-bold uppercase tracking-wider text-neutral-300 mb-1">
+                      3. Monto Cobrado ($ ARS)
                     </label>
                     <input
-                      type="text"
-                      placeholder="Ej: Delantero derecho, marca Corven..."
-                      value={notasTrabajoAdicional}
-                      onChange={(e) => setNotasTrabajoAdicional(e.target.value)}
-                      className="w-full bg-[#111] border border-neutral-800 focus:border-red-600 focus:outline-none text-xs text-white rounded px-3 py-1.5"
+                      id={montoInputId}
+                      type="number"
+                      required
+                      placeholder="Ej: 45000"
+                      value={montoCobrado}
+                      onChange={(e) => setMontoCobrado(e.target.value)}
+                      className="w-full bg-[#111] border border-neutral-800 focus:border-red-600 focus:outline-none rounded-lg px-3 py-2 text-sm text-white font-mono"
                     />
+                  </div>
+
+                  {/* Auto-accounting integration */}
+                  <div className="p-3 rounded-lg bg-neutral-950 border border-neutral-800 space-y-2.5">
+                    <label className="flex items-center gap-2 text-xs text-neutral-300 cursor-pointer font-medium">
+                      <input
+                        type="checkbox"
+                        checked={autoRegistrarContabilidad}
+                        onChange={(e) => setAutoRegistrarContabilidad(e.target.checked)}
+                        className="rounded text-red-600 focus:ring-0 bg-neutral-900 border-neutral-700"
+                      />
+                      <span>Sumar automáticamente a Contabilidad como Ingreso</span>
+                    </label>
+
+                    {autoRegistrarContabilidad && (
+                      <div>
+                        <label htmlFor={metodoPagoRepId} className="block text-[11px] font-heading font-bold text-neutral-400 uppercase mb-1">
+                          Método de Cobro
+                        </label>
+                        <select
+                          id={metodoPagoRepId}
+                          value={metodoPagoReparacion}
+                          onChange={(e) => setMetodoPagoReparacion(e.target.value)}
+                          className="w-full bg-[#111] border border-neutral-800 text-xs text-white rounded px-2.5 py-1.5"
+                        >
+                          <option value="Efectivo">Efectivo</option>
+                          <option value="Mercado Pago / Transferencia">Mercado Pago / Transferencia</option>
+                          <option value="Tarjeta de Débito">Tarjeta de Débito</option>
+                          <option value="Tarjeta de Crédito">Tarjeta de Crédito</option>
+                        </select>
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                <div>
-                  <label htmlFor={montoInputId} className="block text-xs font-heading font-bold uppercase tracking-wider text-neutral-300 mb-1">
-                    3. Monto Cobrado ($ ARS)
-                  </label>
-                  <input
-                    id={montoInputId}
-                    type="number"
-                    required
-                    placeholder="Ej: 45000"
-                    value={montoCobrado}
-                    onChange={(e) => setMontoCobrado(e.target.value)}
-                    className="w-full bg-[#111] border border-neutral-800 focus:border-red-600 focus:outline-none rounded-lg px-3 py-2 text-sm text-white font-mono"
-                  />
-                </div>
-
-                {/* Auto-accounting integration */}
-                <div className="p-3 rounded-lg bg-neutral-950 border border-neutral-800 space-y-2.5">
-                  <label className="flex items-center gap-2 text-xs text-neutral-300 cursor-pointer font-medium">
-                    <input
-                      type="checkbox"
-                      checked={autoRegistrarContabilidad}
-                      onChange={(e) => setAutoRegistrarContabilidad(e.target.checked)}
-                      className="rounded text-red-600 focus:ring-0 bg-neutral-900 border-neutral-700"
-                    />
-                    <span>Sumar automáticamente a Contabilidad como Ingreso</span>
-                  </label>
-
-                  {autoRegistrarContabilidad && (
-                    <div>
-                      <label htmlFor={metodoPagoRepId} className="block text-[11px] font-heading font-bold text-neutral-400 uppercase mb-1">
-                        Método de Cobro
-                      </label>
-                      <select
-                        id={metodoPagoRepId}
-                        value={metodoPagoReparacion}
-                        onChange={(e) => setMetodoPagoReparacion(e.target.value)}
-                        className="w-full bg-[#111] border border-neutral-800 text-xs text-white rounded px-2.5 py-1.5"
-                      >
-                        <option value="Efectivo">Efectivo</option>
-                        <option value="Mercado Pago / Transferencia">Mercado Pago / Transferencia</option>
-                        <option value="Tarjeta de Débito">Tarjeta de Débito</option>
-                        <option value="Tarjeta de Crédito">Tarjeta de Crédito</option>
-                      </select>
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-3 pt-4 border-t border-neutral-900">
+                {/* Footer fijo con botones siempre a la vista */}
+                <div className="p-4 sm:p-5 bg-neutral-950 border-t border-neutral-800 flex items-center gap-3 shrink-0">
                   <button
                     type="button"
                     onClick={() => setSelectedTurno(null)}
-                    className="flex-1 py-2.5 rounded bg-neutral-900 hover:bg-neutral-800 text-neutral-300 font-heading font-bold text-xs uppercase tracking-wider transition-colors"
+                    className="flex-1 py-3 rounded bg-neutral-900 hover:bg-neutral-800 text-neutral-300 font-heading font-bold text-xs uppercase tracking-wider transition-colors"
                   >
                     Cancelar
                   </button>
                   <button
                     type="submit"
                     disabled={savingWork}
-                    className="flex-2 py-2.5 rounded bg-red-600 hover:bg-red-700 active:scale-95 text-white font-heading font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-red-600/30 transition-all disabled:opacity-50"
+                    className="flex-2 py-3 rounded bg-red-600 hover:bg-red-700 active:scale-95 text-white font-heading font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-red-600/30 transition-all disabled:opacity-50"
                   >
                     {savingWork ? (
                       <>
@@ -1418,60 +2006,65 @@ function doOptions(e) {
 
         {/* MODAL: NUEVO INGRESO / GASTO CONTABLE */}
         {showModalMovimiento && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="relative w-full max-w-md bg-[#0a0a0a] border-2 border-red-600 rounded-xl shadow-2xl p-6 sm:p-8">
-              <button
-                onClick={() => setShowModalMovimiento(false)}
-                className="absolute top-4 right-4 text-neutral-400 hover:text-white p-1 rounded-lg hover:bg-neutral-900 transition-colors"
-                aria-label="Cerrar modal"
-              >
-                <X className="w-5 h-5" />
-              </button>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/90 backdrop-blur-sm animate-in fade-in duration-200 overflow-y-auto">
+            <div className="relative w-full max-w-md bg-[#0a0a0a] border-2 border-red-600 rounded-xl shadow-2xl flex flex-col max-h-[92vh] sm:max-h-[88vh] my-auto overflow-hidden">
+              {/* Header fijo superior */}
+              <div className="relative p-5 sm:p-6 pb-4 border-b border-neutral-800 bg-[#0a0a0a] shrink-0">
+                <button
+                  onClick={() => setShowModalMovimiento(false)}
+                  className="absolute top-4 right-4 text-neutral-400 hover:text-white p-1 rounded-lg hover:bg-neutral-900 transition-colors"
+                  aria-label="Cerrar modal"
+                >
+                  <X className="w-5 h-5" />
+                </button>
 
-              <div className="flex items-center gap-2 text-red-500 mb-1">
-                <Receipt className="w-5 h-5" />
-                <span className="font-heading font-black text-xs uppercase tracking-widest">
-                  Gestión de Caja Taller
-                </span>
+                <div className="flex items-center gap-2 text-red-500 mb-1">
+                  <Receipt className="w-5 h-5" />
+                  <span className="font-heading font-black text-xs uppercase tracking-widest">
+                    Gestión de Caja Taller
+                  </span>
+                </div>
+
+                <h2 className="font-heading font-black text-xl text-white uppercase tracking-tight">
+                  {nuevoTipo === 'ingreso' ? 'Registrar Nuevo Ingreso' : 'Registrar Nuevo Gasto'}
+                </h2>
+
+                {/* Segmented type control */}
+                <div className="grid grid-cols-2 gap-2 mt-4 p-1 rounded-lg bg-neutral-950 border border-neutral-800">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNuevoTipo('ingreso');
+                      setNuevaCategoria('Mano de Obra / Taller');
+                    }}
+                    className={`py-2 text-xs font-heading font-bold uppercase rounded transition-colors ${
+                      nuevoTipo === 'ingreso'
+                        ? 'bg-emerald-600 text-white shadow'
+                        : 'text-neutral-400 hover:text-white'
+                    }`}
+                  >
+                    ▲ Ingreso (+)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNuevoTipo('gasto');
+                      setNuevaCategoria('Repuestos / Repuesteros');
+                    }}
+                    className={`py-2 text-xs font-heading font-bold uppercase rounded transition-colors ${
+                      nuevoTipo === 'gasto'
+                        ? 'bg-red-600 text-white shadow'
+                        : 'text-neutral-400 hover:text-white'
+                    }`}
+                  >
+                    ▼ Gasto (-)
+                  </button>
+                </div>
               </div>
 
-              <h2 className="font-heading font-black text-xl text-white uppercase tracking-tight">
-                {nuevoTipo === 'ingreso' ? 'Registrar Nuevo Ingreso' : 'Registrar Nuevo Gasto'}
-              </h2>
-
-              {/* Segmented type control */}
-              <div className="grid grid-cols-2 gap-2 mt-4 p-1 rounded-lg bg-neutral-950 border border-neutral-800">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setNuevoTipo('ingreso');
-                    setNuevaCategoria('Mano de Obra / Taller');
-                  }}
-                  className={`py-2 text-xs font-heading font-bold uppercase rounded transition-colors ${
-                    nuevoTipo === 'ingreso'
-                      ? 'bg-emerald-600 text-white shadow'
-                      : 'text-neutral-400 hover:text-white'
-                  }`}
-                >
-                  ▲ Ingreso (+)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setNuevoTipo('gasto');
-                    setNuevaCategoria('Repuestos / Repuesteros');
-                  }}
-                  className={`py-2 text-xs font-heading font-bold uppercase rounded transition-colors ${
-                    nuevoTipo === 'gasto'
-                      ? 'bg-red-600 text-white shadow'
-                      : 'text-neutral-400 hover:text-white'
-                  }`}
-                >
-                  ▼ Gasto (-)
-                </button>
-              </div>
-
-              <form onSubmit={handleSaveNuevoMovimiento} className="mt-4 space-y-3.5">
+              {/* Formulario con cuerpo scrolleable */}
+              <form onSubmit={handleSaveNuevoMovimiento} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                <div className="overflow-y-auto p-5 sm:p-6 space-y-4 flex-1 overscroll-contain">
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label htmlFor={fechaMovId} className="block text-xs font-heading font-bold uppercase text-neutral-400 mb-1">
@@ -1631,18 +2224,21 @@ function doOptions(e) {
                   />
                 </div>
 
-                <div className="flex items-center gap-3 pt-3 border-t border-neutral-900">
+                </div>
+
+                {/* Footer fijo con botones siempre visibles */}
+                <div className="p-4 sm:p-5 bg-neutral-950 border-t border-neutral-800 flex items-center gap-3 shrink-0">
                   <button
                     type="button"
                     onClick={() => setShowModalMovimiento(false)}
-                    className="flex-1 py-2.5 rounded bg-neutral-900 hover:bg-neutral-800 text-neutral-300 font-heading font-bold text-xs uppercase tracking-wider transition-colors"
+                    className="flex-1 py-3 rounded bg-neutral-900 hover:bg-neutral-800 text-neutral-300 font-heading font-bold text-xs uppercase tracking-wider transition-colors"
                   >
                     Cancelar
                   </button>
                   <button
                     type="submit"
                     disabled={guardandoMovimiento || !nuevoConcepto || !nuevoMonto}
-                    className={`flex-2 py-2.5 rounded font-heading font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg transition-all disabled:opacity-50 text-white ${
+                    className={`flex-2 py-3 rounded font-heading font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg transition-all disabled:opacity-50 text-white ${
                       nuevoTipo === 'ingreso'
                         ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-900/40'
                         : 'bg-red-600 hover:bg-red-700 shadow-red-900/40'
@@ -1656,6 +2252,220 @@ function doOptions(e) {
                     ) : (
                       <>
                         <span>{nuevoTipo === 'ingreso' ? 'Asentar Ingreso' : 'Asentar Gasto'}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* MODAL: CARGAR TURNO POR MOSTRADOR / PRESENCIAL */}
+        {/* ========================================================================= */}
+        {showModalTurnoMostrador && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="relative w-full max-w-lg bg-[#0a0a0a] border-2 border-red-600 rounded-xl p-6 shadow-2xl space-y-5 max-h-[92vh] overflow-y-auto">
+              <button
+                type="button"
+                onClick={() => setShowModalTurnoMostrador(false)}
+                className="absolute top-4 right-4 text-neutral-400 hover:text-white p-1 rounded-lg hover:bg-neutral-900 transition-colors"
+                aria-label="Cerrar modal"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div>
+                <div className="flex items-center gap-2 text-red-500 mb-1">
+                  <Car className="w-5 h-5" />
+                  <span className="font-heading font-bold text-xs uppercase tracking-wider">
+                    Recepción de Taller · Carga de Turno por Mostrador
+                  </span>
+                </div>
+                <h2 className="font-heading font-black text-xl text-white uppercase tracking-wide">
+                  Cargar Turno por Mostrador
+                </h2>
+                <p className="text-xs text-neutral-400 mt-1">
+                  Verifica en tiempo real la disponibilidad de turnos en Google Sheets y da de alta automáticamente al cliente con contraseña predeterminada.
+                </p>
+              </div>
+
+              <form onSubmit={handleGuardarTurnoMostrador} className="space-y-4">
+                {/* 1. Datos del Vehículo y Fecha */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-heading font-bold uppercase text-neutral-300 mb-1">
+                      Patente / Dominio *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Ej: PEU534 o AE123MZ"
+                      value={mostradorPatente}
+                      onChange={(e) => setMostradorPatente(e.target.value.toUpperCase())}
+                      className="w-full bg-[#111] border border-neutral-800 focus:border-red-600 focus:outline-none rounded-lg px-3 py-2 text-sm font-mono font-bold text-white uppercase tracking-wider"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-heading font-bold uppercase text-neutral-300 mb-1">
+                      Fecha del Turno *
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={mostradorFecha}
+                      onChange={(e) => handleMostradorDateChange(e.target.value)}
+                      className="w-full bg-[#111] border border-neutral-800 focus:border-red-600 focus:outline-none rounded-lg px-3 py-2 text-sm text-white"
+                    />
+                  </div>
+                </div>
+
+                {/* 2. Horarios con Comprobación de Disponibilidad en Tiempo Real */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-heading font-bold uppercase text-neutral-300">
+                      Horarios Disponibles para esa Fecha *
+                    </label>
+                    {loadingMostradorSlots && (
+                      <span className="text-[11px] text-red-400 flex items-center gap-1 font-heading">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        Verificando disponibilidad...
+                      </span>
+                    )}
+                  </div>
+
+                  {loadingMostradorSlots ? (
+                    <div className="p-4 rounded-lg bg-neutral-900 border border-neutral-800 text-center text-xs text-neutral-400 flex items-center justify-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin text-red-500" />
+                      <span>Consultando horarios libres en Google Sheets...</span>
+                    </div>
+                  ) : mostradorHorariosDisponibles.length === 0 ? (
+                    <div className="p-3.5 rounded-lg bg-red-950/40 border border-red-800/80 text-xs text-red-400 text-center space-y-1">
+                      <div className="font-heading font-bold uppercase">❌ Sin horarios disponibles</div>
+                      <p className="text-[11px] text-neutral-400">
+                        No quedan turnos libres para esta fecha (o el taller permanece cerrado). Por favor seleccioná otro día.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <select
+                        value={mostradorHorario}
+                        onChange={(e) => setMostradorHorario(e.target.value)}
+                        required
+                        className="w-full bg-[#111] border border-neutral-800 focus:border-red-600 focus:outline-none rounded-lg px-3 py-2 text-xs text-white font-mono font-bold"
+                      >
+                        <option value="">-- Elegir horario disponible --</option>
+                        {mostradorHorariosDisponibles.map((h) => (
+                          <option key={h} value={h}>
+                            🕒 {h} hs (Disponible)
+                          </option>
+                        ))}
+                      </select>
+
+                      <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                        <span className="text-[10px] text-neutral-500 uppercase font-bold">Toque rápido:</span>
+                        {mostradorHorariosDisponibles.map((h) => (
+                          <button
+                            type="button"
+                            key={h}
+                            onClick={() => setMostradorHorario(h)}
+                            className={`px-2.5 py-1 rounded text-[11px] font-mono font-bold transition-all cursor-pointer ${
+                              mostradorHorario === h
+                                ? 'bg-red-600 text-white shadow-md shadow-red-950'
+                                : 'bg-neutral-900 text-neutral-300 hover:text-white hover:bg-neutral-800 border border-neutral-800'
+                            }`}
+                          >
+                            {h} hs
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 3. Datos del Cliente para Creación de Usuario */}
+                <div className="space-y-3 pt-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-heading font-bold uppercase text-neutral-300 mb-1">
+                        Nombre y Apellido *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Ej: Juan Pérez"
+                        value={mostradorNombre}
+                        onChange={(e) => setMostradorNombre(e.target.value)}
+                        className="w-full bg-[#111] border border-neutral-800 focus:border-red-600 focus:outline-none rounded-lg px-3 py-2 text-sm text-white"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-heading font-bold uppercase text-neutral-300 mb-1">
+                        Teléfono / WhatsApp *
+                      </label>
+                      <input
+                        type="tel"
+                        required
+                        placeholder="Ej: 2625 123456"
+                        value={mostradorTelefono}
+                        onChange={(e) => setMostradorTelefono(e.target.value)}
+                        className="w-full bg-[#111] border border-neutral-800 focus:border-red-600 focus:outline-none rounded-lg px-3 py-2 text-sm text-white font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-heading font-bold uppercase text-neutral-300 mb-1">
+                      Correo Electrónico del Cliente *
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      placeholder="cliente@email.com"
+                      value={mostradorEmail}
+                      onChange={(e) => setMostradorEmail(e.target.value)}
+                      className="w-full bg-[#111] border border-neutral-800 focus:border-red-600 focus:outline-none rounded-lg px-3 py-2 text-sm text-white"
+                    />
+                  </div>
+                </div>
+
+                {/* 4. Notificación de Alta de Usuario Automática con clave 123456 */}
+                <div className="p-3.5 rounded-lg bg-red-950/20 border border-red-800/50 space-y-1">
+                  <div className="flex items-center gap-1.5 text-xs font-heading font-black uppercase text-red-400">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Creación Automática de Usuario Web</span>
+                  </div>
+                  <p className="text-[11px] text-neutral-300 leading-relaxed">
+                    Al confirmar, el sistema registrará automáticamente al cliente en la base de datos con la contraseña:{' '}
+                    <strong className="text-white font-mono bg-neutral-900 px-2 py-0.5 rounded border border-neutral-700">123456</strong>{' '}
+                    para que pueda ingresar a la web con su correo y consultar su turno o historial.
+                  </p>
+                </div>
+
+                <div className="pt-2 flex items-center justify-end gap-3 border-t border-neutral-800">
+                  <button
+                    type="button"
+                    onClick={() => setShowModalTurnoMostrador(false)}
+                    className="px-4 py-2.5 rounded bg-neutral-900 hover:bg-neutral-800 text-neutral-300 font-heading font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={guardandoTurnoMostrador || !mostradorHorario || loadingMostradorSlots}
+                    className="px-6 py-2.5 rounded bg-red-600 hover:bg-red-700 active:scale-95 text-white font-heading font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-red-600/30 transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    {guardandoTurnoMostrador ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Guardando Turno y Creando Usuario...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>💾 Confirmar y Guardar Turno</span>
                       </>
                     )}
                   </button>

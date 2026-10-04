@@ -25,6 +25,8 @@ export interface TurnoAdmin {
   fecha: string;
   horario: string;
   patente: string;
+  nombre?: string;
+  telefono?: string;
 }
 
 export interface DatosTrabajoAdmin {
@@ -46,6 +48,35 @@ export interface MovimientoContable {
   monto: number;
   metodoPago: string;
   referencia?: string;
+}
+
+export interface ItemPresupuesto {
+  id: string;
+  tipo: 'mano_de_obra' | 'repuesto';
+  descripcion: string;
+  cantidad: number;
+  precioUnitario: number;
+  subtotal: number;
+}
+
+export interface Presupuesto {
+  id: string;
+  numero: string;
+  fecha: string;
+  validezDias: number;
+  clienteNombre: string;
+  clienteTelefono: string;
+  clienteEmail?: string;
+  vehiculoModelo?: string;
+  patente: string;
+  kilometraje?: string;
+  items: ItemPresupuesto[];
+  descuentoPorcentaje?: number;
+  total: number;
+  estado: 'pendiente' | 'aprobado' | 'rechazado' | 'facturado';
+  observaciones?: string;
+  turnoRef?: string;
+  createdAt: string;
 }
 
 export interface ApiResponse<T = any> {

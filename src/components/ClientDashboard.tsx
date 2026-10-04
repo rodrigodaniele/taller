@@ -132,7 +132,7 @@ export const ClientDashboard = ({
         onShowToast(
           'info',
           'Conectando con Mercado Pago...',
-          'Te estamos redirigiendo para abonar la seña de $10.000 ARS.'
+          'Te estamos redirigiendo para abonar la seña de reserva.'
         );
         setShowBookingForm(false);
         setPatente('');
@@ -245,7 +245,7 @@ export const ClientDashboard = ({
                   Reservar Turno con Seña Online
                 </h3>
                 <p className="text-xs text-neutral-400 mt-1">
-                  Seña requerida de <strong>$10.000 ARS</strong> vía Mercado Pago para congelar tu lugar en agenda.
+                  Seña requerida vía Mercado Pago para congelar tu lugar en agenda.
                 </p>
               </div>
             </div>
@@ -333,7 +333,7 @@ export const ClientDashboard = ({
                     </>
                   ) : (
                     <>
-                      <span>Abonar Seña ($10.000) y Confirmar</span>
+                      <span>Abonar Seña y Confirmar</span>
                     </>
                   )}
                 </button>

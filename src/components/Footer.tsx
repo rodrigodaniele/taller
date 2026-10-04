@@ -56,7 +56,7 @@ export const Footer = () => {
                 rel="noopener noreferrer"
                 className="hover:text-red-400 transition-colors"
               >
-                General Alvear, Mendoza
+                Av. San Juan e Independencia, General Alvear, Mendoza
               </a>
             </div>
             <div className="flex items-center gap-2">

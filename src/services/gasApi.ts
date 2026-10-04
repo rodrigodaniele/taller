@@ -1,4 +1,4 @@
-import { ApiResponse, DatosTrabajoAdmin, TurnoAdmin } from '../types';
+import { ApiResponse, DatosTrabajoAdmin, TurnoAdmin, Presupuesto } from '../types';
 
 export const DEFAULT_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbziaELEqc9K1IKN2iXdEZ6bDN-GRUEJUUneEWfGM2VFg60uunAq_vb7gOIsxaDJEL08FA/exec";
 export const EMAIL_ADMIN_OFICIAL = "rodrigodanieleaset@gmail.com";
@@ -40,13 +40,28 @@ export const gasApi = {
     });
   },
 
-  async register(nombre: string, telefono: string, email: string, password: string): Promise<ApiResponse> {
+  async register(
+    nombre: string,
+    telefono: string,
+    email: string,
+    password: string,
+    codigoVerificacion?: string
+  ): Promise<ApiResponse> {
     return callGasApi({
       accion: 'registrar',
       nombre: nombre.trim(),
       telefono: telefono.trim(),
       email: email.trim().toLowerCase(),
       password,
+      codigoVerificacion: codigoVerificacion?.trim(),
+    });
+  },
+
+  async sendVerificationCode(email: string, nombre: string): Promise<ApiResponse> {
+    return callGasApi({
+      accion: 'enviarCodigoVerificacion',
+      email: email.trim().toLowerCase(),
+      nombre: nombre.trim(),
     });
   },
 
@@ -64,6 +79,21 @@ export const gasApi = {
       fecha,
       horario,
       patente: patente.trim().toUpperCase(),
+    });
+  },
+
+  async createTurnoMostrador(datos: {
+    patente: string;
+    fecha: string;
+    horario: string;
+    nombre: string;
+    telefono: string;
+    email: string;
+  }): Promise<{ success: boolean; error?: string }> {
+    return callGasApi({
+      accion: 'crearTurnoMostrador',
+      ...datos,
+      password: '123456',
     });
   },
 
@@ -137,6 +167,96 @@ export const gasApi = {
     try {
       return await callGasApi({
         accion: 'eliminarMovimientoContable',
+        id,
+      });
+    } catch (err: any) {
+      return { success: true };
+    }
+  },
+
+  // --- MÓDULO DE PRESUPUESTOS & COTIZACIONES ---
+  async getPresupuestos(): Promise<{ success: boolean; presupuestos: Presupuesto[]; error?: string }> {
+    try {
+      const res = await callGasApi({
+        accion: 'obtenerPresupuestos',
+      });
+      if (res && res.resultado === 'ok' && Array.isArray(res.presupuestos)) {
+        localStorage.setItem('taller_presupuestos_v1', JSON.stringify(res.presupuestos));
+        return { success: true, presupuestos: res.presupuestos };
+      }
+    } catch (e: any) {
+      console.warn('Conexión con Google Sheets para presupuestos no disponible o script previo, leyendo caché local:', e);
+    }
+    const saved = localStorage.getItem('taller_presupuestos_v1');
+    const list: Presupuesto[] = saved ? JSON.parse(saved) : [];
+    return { success: true, presupuestos: list };
+  },
+
+  async savePresupuesto(presupuesto: Presupuesto): Promise<{ success: boolean; error?: string }> {
+    // 1. Guardar en almacenamiento local inmediato
+    try {
+      const saved = localStorage.getItem('taller_presupuestos_v1');
+      const list: Presupuesto[] = saved ? JSON.parse(saved) : [];
+      const idx = list.findIndex((p) => p.id === presupuesto.id);
+      if (idx >= 0) {
+        list[idx] = presupuesto;
+      } else {
+        list.unshift(presupuesto);
+      }
+      localStorage.setItem('taller_presupuestos_v1', JSON.stringify(list));
+    } catch (e) {
+      console.error(e);
+    }
+
+    // 2. Enviar a Google Sheets
+    try {
+      return await callGasApi({
+        accion: 'guardarPresupuesto',
+        presupuesto,
+      });
+    } catch (err: any) {
+      console.warn('Guardado en caché local. Recordá actualizar el script de Google Sheets para sincronizar.', err);
+      return { success: true };
+    }
+  },
+
+  async updatePresupuestoEstado(id: string, estado: Presupuesto['estado']): Promise<{ success: boolean; error?: string }> {
+    try {
+      const saved = localStorage.getItem('taller_presupuestos_v1');
+      if (saved) {
+        const list: Presupuesto[] = JSON.parse(saved);
+        const updated = list.map((p) => (p.id === id ? { ...p, estado } : p));
+        localStorage.setItem('taller_presupuestos_v1', JSON.stringify(updated));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+
+    try {
+      return await callGasApi({
+        accion: 'actualizarEstadoPresupuesto',
+        id,
+        estado,
+      });
+    } catch (err: any) {
+      return { success: true };
+    }
+  },
+
+  async deletePresupuesto(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const saved = localStorage.getItem('taller_presupuestos_v1');
+      if (saved) {
+        const list: Presupuesto[] = JSON.parse(saved).filter((p: Presupuesto) => p.id !== id);
+        localStorage.setItem('taller_presupuestos_v1', JSON.stringify(list));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+
+    try {
+      return await callGasApi({
+        accion: 'borrarPresupuesto',
         id,
       });
     } catch (err: any) {
