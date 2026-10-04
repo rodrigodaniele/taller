@@ -1,7 +1,27 @@
 import { useState, useEffect, useId } from 'react';
-import { User, Turno, HistorialServicio } from '../types';
+import { User, Turno, HistorialServicio, Presupuesto } from '../types';
 import { gasApi } from '../services/gasApi';
-import { Calendar, Clock, Car, History, AlertCircle, Loader2, ArrowLeft, PlusCircle, Wrench, ShieldCheck } from 'lucide-react';
+import { formatearFechaArgentina, calcularFechaVencimiento } from '../utils/dateFormatter';
+import {
+  Calendar,
+  Clock,
+  Car,
+  History,
+  AlertCircle,
+  Loader2,
+  ArrowLeft,
+  PlusCircle,
+  Wrench,
+  ShieldCheck,
+  FileText,
+  CheckCircle2,
+  Printer,
+  MessageCircle,
+  RefreshCw,
+  X,
+  ExternalLink,
+  Check
+} from 'lucide-react';
 
 interface ClientDashboardProps {
   user: User;
@@ -17,7 +37,7 @@ export const ClientDashboard = ({
   onShowToast,
 }: ClientDashboardProps) => {
   const [turnos, setTurnos] = useState<Turno[]>(initialTurnos);
-  const [activeTab, setActiveTab] = useState<'turnos' | 'historial'>('turnos');
+  const [activeTab, setActiveTab] = useState<'turnos' | 'presupuestos' | 'historial'>('turnos');
 
   // New Turno Form State
   const [showBookingForm, setShowBookingForm] = useState(false);
@@ -31,6 +51,12 @@ export const ClientDashboard = ({
   // Vehicle service history state
   const [historialList, setHistorialList] = useState<HistorialServicio[]>([]);
   const [loadingHistorial, setLoadingHistorial] = useState(false);
+
+  // Presupuestos state
+  const [presupuestos, setPresupuestos] = useState<Presupuesto[]>([]);
+  const [loadingPresupuestos, setLoadingPresupuestos] = useState(false);
+  const [presupuestoSeleccionadoModal, setPresupuestoSeleccionadoModal] = useState<Presupuesto | null>(null);
+  const [aprobandoId, setAprobandoId] = useState<string | null>(null);
 
   const patenteId = useId();
   const fechaId = useId();
@@ -87,8 +113,6 @@ export const ClientDashboard = ({
     }
 
     // Base available schedule slots
-    // Monday-Friday: 08:00 to 11:00 & 16:00 to 19:00
-    // Saturday: 08:00 to 11:00
     const baseSlots =
       dayOfWeek >= 1 && dayOfWeek <= 5
         ? ['08:00', '09:00', '10:00', '11:00', '16:00', '17:00', '18:00', '19:00']
@@ -171,11 +195,289 @@ export const ClientDashboard = ({
     }
   };
 
+  // Fetch client budgets & quotes
+  const loadClientPresupuestos = async () => {
+    setLoadingPresupuestos(true);
+    try {
+      const res = await gasApi.getPresupuestos();
+      if (res && res.success && Array.isArray(res.presupuestos)) {
+        const userPatentes = turnos.map((t) => (t.patente || '').toUpperCase().trim());
+        const userEmail = (user.email || '').toLowerCase().trim();
+
+        const filtrados = res.presupuestos.filter((p) => {
+          const emailMatch = p.clienteEmail && p.clienteEmail.toLowerCase().trim() === userEmail;
+          const patenteMatch = p.patente && userPatentes.includes(p.patente.toUpperCase().trim());
+          return emailMatch || patenteMatch;
+        });
+
+        setPresupuestos(filtrados);
+      } else {
+        setPresupuestos([]);
+      }
+    } catch (err) {
+      console.warn('Error loading client presupuestos:', err);
+    } finally {
+      setLoadingPresupuestos(false);
+    }
+  };
+
+  useEffect(() => {
+    loadClientPresupuestos();
+  }, [user.email, turnos]);
+
   useEffect(() => {
     if (activeTab === 'historial') {
       loadClientHistory();
+    } else if (activeTab === 'presupuestos') {
+      loadClientPresupuestos();
     }
   }, [activeTab]);
+
+  // Client approves budget directly
+  const handleAprobarPresupuesto = async (p: Presupuesto) => {
+    setAprobandoId(p.id);
+    try {
+      await gasApi.updatePresupuestoEstado(p.id, 'aprobado');
+      setPresupuestos((prev) =>
+        prev.map((item) => (item.id === p.id ? { ...item, estado: 'aprobado' } : item))
+      );
+      if (presupuestoSeleccionadoModal?.id === p.id) {
+        setPresupuestoSeleccionadoModal({ ...presupuestoSeleccionadoModal, estado: 'aprobado' });
+      }
+      onShowToast(
+        'success',
+        '¡Presupuesto Aprobado!',
+        `Confirmaste la cotización ${p.numero} ($${p.total.toLocaleString('es-AR')}). Le avisamos a Rodrigo para avanzar.`
+      );
+
+      // Offer WhatsApp message to Rodrigo
+      const mensaje = `Hola Rodrigo! 👋 Acabo de aprobar desde la web de La Casa de la Dirección el Presupuesto *${p.numero}* para mi auto (*${p.patente}* - ${p.vehiculoModelo || ''}) por un total de *$${p.total.toLocaleString('es-AR')}*. ¡Confirmado para realizar el trabajo!`;
+      const url = `https://wa.me/5492625532070?text=${encodeURIComponent(mensaje)}`;
+      window.open(url, '_blank');
+    } catch (err) {
+      console.error(err);
+      onShowToast('error', 'Error al aprobar', 'No se pudo registrar la confirmación en el servidor.');
+    } finally {
+      setAprobandoId(null);
+    }
+  };
+
+  const handleConsultarWhatsApp = (p: Presupuesto) => {
+    const mensaje = `Hola Rodrigo, te escribo por el Presupuesto *${p.numero}* (${p.patente} - ${p.vehiculoModelo || ''}) por *$${p.total.toLocaleString('es-AR')}*. Quería consultarte lo siguiente:`;
+    const url = `https://wa.me/5492625532070?text=${encodeURIComponent(mensaje)}`;
+    window.open(url, '_blank');
+  };
+
+  const imprimirPresupuestoCliente = (p: Presupuesto) => {
+    const fechaEmision = formatearFechaArgentina(p.fecha);
+    const fechaVence = calcularFechaVencimiento(p.fecha, p.validezDias || 7);
+
+    const itemsHtml = p.items
+      .map(
+        (it) => `
+        <tr>
+          <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px;">
+            <strong style="color: #111827;">${it.tipo === 'mano_de_obra' ? '🛠️ MANO DE OBRA' : '🔩 REPUESTO'}:</strong>
+            <span style="display: block; color: #4b5563; margin-top: 2px;">${it.descripcion}</span>
+          </td>
+          <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: center; font-family: monospace; font-size: 13px;">
+            ${it.cantidad}
+          </td>
+          <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: right; font-family: monospace; font-size: 13px; color: #374151;">
+            $${Number(it.precioUnitario).toLocaleString('es-AR')}
+          </td>
+          <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: right; font-family: monospace; font-weight: bold; font-size: 13px; color: #111827;">
+            $${Number(it.subtotal).toLocaleString('es-AR')}
+          </td>
+        </tr>
+      `
+      )
+      .join('');
+
+    try {
+      const printWindow = window.open('', '_blank', 'width=900,height=1000');
+      if (printWindow) {
+        printWindow.document.write(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <meta charset="UTF-8">
+              <title>Presupuesto ${p.numero} - La Casa de la Dirección</title>
+              <style>
+                * { box-sizing: border-box; margin: 0; padding: 0; }
+                body {
+                  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                  color: #111827;
+                  background-color: #ffffff;
+                  padding: 30px;
+                  line-height: 1.5;
+                }
+                .btn-imprimir {
+                  background: #dc2626;
+                  color: #ffffff;
+                  padding: 12px 28px;
+                  border: none;
+                  border-radius: 8px;
+                  font-weight: 800;
+                  font-size: 14px;
+                  text-transform: uppercase;
+                  letter-spacing: 0.5px;
+                  cursor: pointer;
+                  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.35);
+                  display: inline-flex;
+                  align-items: center;
+                  gap: 8px;
+                }
+                .btn-imprimir:hover { background: #b91c1c; }
+                .plate-badge {
+                  display: inline-block;
+                  background: #000000;
+                  color: #ffffff;
+                  padding: 4px 12px;
+                  border-radius: 6px;
+                  font-family: monospace;
+                  font-weight: 900;
+                  letter-spacing: 2px;
+                  border: 2px solid #374151;
+                  font-size: 15px;
+                }
+                .total-card {
+                  background: #fef2f2;
+                  border: 2px solid #dc2626;
+                  border-radius: 12px;
+                  padding: 18px 24px;
+                  text-align: right;
+                  margin-top: 15px;
+                }
+                .total-amount {
+                  font-size: 34px;
+                  font-weight: 900;
+                  color: #991b1b;
+                  font-family: monospace;
+                  line-height: 1.1;
+                }
+                @media print {
+                  .no-print { display: none !important; }
+                  body { padding: 10px !important; }
+                  @page { margin: 12mm; size: A4; }
+                }
+              </style>
+            </head>
+            <body>
+              <div class="no-print" style="text-align: center; margin-bottom: 30px; padding: 15px; background: #f3f4f6; border-radius: 10px;">
+                <button class="btn-imprimir" onclick="window.print()">🖨️ Mandar a Imprimir / Guardar en PDF</button>
+                <p style="font-size: 12px; color: #4b5563; margin-top: 8px;">
+                  Consejo: en la ventana de impresión podés elegir <strong>"Guardar como PDF"</strong> como destino.
+                </p>
+              </div>
+
+              <!-- Cabecera Oficial Taller -->
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #dc2626; padding-bottom: 18px; margin-bottom: 24px;">
+                <div>
+                  <h1 style="font-size: 26px; font-weight: 900; text-transform: uppercase; color: #000; letter-spacing: -0.5px;">
+                    LA CASA DE LA DIRECCIÓN
+                  </h1>
+                  <p style="font-size: 12px; font-weight: 700; color: #4b5563; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px;">
+                    Alineación · Balanceo · Tren Delantero · Dirección · Frenos
+                  </p>
+                  <p style="font-size: 12px; color: #6b7280; margin-top: 4px;">
+                    📍 Av. San Juan e Independencia, General Alvear, Mendoza
+                  </p>
+                  <p style="font-size: 12px; color: #6b7280;">
+                    📞 WhatsApp Taller: <strong>2625 532070</strong>
+                  </p>
+                </div>
+                <div style="text-align: right;">
+                  <div style="font-size: 22px; font-weight: 900; color: #dc2626; font-family: monospace;">
+                    ${p.numero}
+                  </div>
+                  <div style="font-size: 13px; color: #374151; margin-top: 4px;">
+                    Fecha de Emisión: <strong style="color: #000;">${fechaEmision}</strong>
+                  </div>
+                  <div style="font-size: 12px; color: #b91c1c; font-weight: 600; margin-top: 2px;">
+                    Válido hasta: <strong>${fechaVence} (${p.validezDias || 7} días)</strong>
+                  </div>
+                  <div style="margin-top: 8px;">
+                    <span style="display: inline-block; padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: 800; text-transform: uppercase; background: #e5e7eb; color: #1f2937;">
+                      Estado: ${p.estado.toUpperCase()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Ficha de Datos del Vehículo y Cliente -->
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; background: #f9fafb; padding: 18px; border-radius: 10px; border: 1px solid #e5e7eb; margin-bottom: 24px;">
+                <div>
+                  <h3 style="font-size: 11px; font-weight: 800; text-transform: uppercase; color: #6b7280; letter-spacing: 1px; margin-bottom: 8px;">
+                    Datos del Cliente
+                  </h3>
+                  <div style="font-size: 15px; font-weight: 800; color: #111827;">${p.clienteNombre}</div>
+                  <div style="font-size: 13px; color: #4b5563; margin-top: 2px;">📞 ${p.clienteTelefono || 'Sin teléfono'}</div>
+                  <div style="font-size: 13px; color: #4b5563;">✉️ ${p.clienteEmail || user.email}</div>
+                </div>
+                <div>
+                  <h3 style="font-size: 11px; font-weight: 800; text-transform: uppercase; color: #6b7280; letter-spacing: 1px; margin-bottom: 8px;">
+                    Vehículo en Cotización
+                  </h3>
+                  <div style="display: flex; align-items: center; gap: 10px;">
+                    <span class="plate-badge">${p.patente}</span>
+                    <strong style="font-size: 15px; color: #111827;">${p.vehiculoModelo || 'Vehículo'}</strong>
+                  </div>
+                  ${p.kilometraje ? `<div style="font-size: 13px; color: #4b5563; margin-top: 6px;">📈 Kilometraje: <strong>${p.kilometraje} km</strong></div>` : ''}
+                </div>
+              </div>
+
+              <!-- Tabla de Items -->
+              <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
+                <thead>
+                  <tr style="background: #111827; color: #ffffff; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;">
+                    <th style="padding: 10px 12px; text-align: left; border-radius: 6px 0 0 6px;">Descripción de Trabajo / Repuesto</th>
+                    <th style="padding: 10px 12px; text-align: center; width: 60px;">Cant.</th>
+                    <th style="padding: 10px 12px; text-align: right; width: 120px;">Unitario</th>
+                    <th style="padding: 10px 12px; text-align: right; width: 130px; border-radius: 0 6px 6px 0;">Subtotal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${itemsHtml}
+                </tbody>
+              </table>
+
+              <!-- Total Card -->
+              <div style="display: flex; justify-content: flex-end;">
+                <div style="width: 320px;">
+                  <div class="total-card">
+                    <span style="font-size: 12px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 1px; display: block;">
+                      Total Final Presupuestado
+                    </span>
+                    <div class="total-amount">
+                      $${Number(p.total).toLocaleString('es-AR')}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Observaciones & Términos -->
+              <div style="margin-top: 30px; padding: 16px; background: #f9fafb; border-left: 4px solid #dc2626; border-radius: 6px; font-size: 12px; color: #4b5563;">
+                <strong style="color: #111827; display: block; margin-bottom: 4px; text-transform: uppercase; font-size: 11px;">
+                  Condiciones y Garantía del Taller:
+                </strong>
+                <p>${p.observaciones || 'Presupuesto válido por 7 días. Precios expresados en moneda nacional (pesos argentinos). Mano de obra y repuestos garantizados por La Casa de la Dirección.'}</p>
+              </div>
+
+              <div style="margin-top: 40px; text-align: center; font-size: 11px; color: #9ca3af; border-top: 1px dashed #d1d5db; padding-top: 15px;">
+                La Casa de la Dirección · Alineación Computarizada y Tren Delantero · General Alvear, Mendoza
+              </div>
+            </body>
+          </html>
+        `);
+        printWindow.document.close();
+      } else {
+        setPresupuestoSeleccionadoModal(p);
+      }
+    } catch {
+      setPresupuestoSeleccionadoModal(p);
+    }
+  };
 
   const turnosProgramados = turnos.filter(
     (t) => String(t.estado).toLowerCase().trim() === 'programado'
@@ -183,6 +485,8 @@ export const ClientDashboard = ({
   const turnosAtendidos = turnos.filter(
     (t) => String(t.estado).toLowerCase().trim() !== 'programado'
   );
+
+  const presupuestosPendientesCount = presupuestos.filter((p) => p.estado === 'pendiente').length;
 
   return (
     <div className="min-h-screen py-10 px-4 sm:px-6 lg:px-8 bg-[#050505]">
@@ -202,7 +506,7 @@ export const ClientDashboard = ({
               onClick={() => {
                 setShowBookingForm(!showBookingForm);
               }}
-              className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-heading font-bold text-xs uppercase tracking-wider rounded shadow-md shadow-red-600/20 transition-all"
+              className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-heading font-bold text-xs uppercase tracking-wider rounded shadow-md shadow-red-600/20 transition-all cursor-pointer"
             >
               <PlusCircle className="w-4 h-4" />
               <span>{showBookingForm ? 'Cerrar Formulario' : 'Solicitar Nuevo Turno'}</span>
@@ -219,24 +523,28 @@ export const ClientDashboard = ({
             <h1 className="text-2xl sm:text-3xl font-heading font-black text-white uppercase tracking-tight">
               Hola, {user.nombre}
             </h1>
-            <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-neutral-400">
-              <span>📧 {user.email}</span>
-              {user.telefono && (
-                <>
-                  <span>·</span>
-                  <span>📱 {user.telefono}</span>
-                </>
-              )}
-            </div>
+            <p className="text-xs text-neutral-400 mt-1">
+              Tu centro de gestión: turnos en taller, cotizaciones presupuestadas e historial clínico automotor.
+            </p>
           </div>
 
-          <div className="flex items-center gap-2 p-3 rounded-lg bg-neutral-950 border border-neutral-800 text-xs">
-            <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            <span className="text-neutral-300 font-medium">Cliente Verificado del Taller</span>
+          <div className="flex flex-wrap gap-4 text-xs font-mono text-neutral-300">
+            <div className="p-3 rounded-lg bg-neutral-950 border border-neutral-800">
+              <span className="text-neutral-500 block text-[10px] uppercase font-bold tracking-wider">
+                Teléfono
+              </span>
+              <span className="font-bold text-white">{user.telefono || 'No especificado'}</span>
+            </div>
+            <div className="p-3 rounded-lg bg-neutral-950 border border-neutral-800">
+              <span className="text-neutral-500 block text-[10px] uppercase font-bold tracking-wider">
+                Correo Electrónico
+              </span>
+              <span className="font-bold text-white">{user.email}</span>
+            </div>
           </div>
         </div>
 
-        {/* Interactive Booking Form Card */}
+        {/* Modal Booking Form */}
         {showBookingForm && (
           <div className="p-6 sm:p-8 rounded-xl bg-[#0a0a0a] border-2 border-red-600 shadow-2xl animate-in fade-in duration-200">
             <div className="flex items-center justify-between pb-4 border-b border-neutral-800 mb-6">
@@ -281,7 +589,7 @@ export const ClientDashboard = ({
                     min={getTomorrowMinDate()}
                     value={fecha}
                     onChange={(e) => handleDateChange(e.target.value)}
-                    className="w-full bg-neutral-950 border border-neutral-800 focus:border-red-600 focus:outline-none rounded-lg px-3 py-2.5 text-sm text-white"
+                    className="w-full bg-neutral-950 border border-neutral-800 focus:border-red-600 focus:outline-none rounded-lg px-3 py-2.5 text-sm text-white [color-scheme:dark]"
                   />
                 </div>
 
@@ -317,14 +625,14 @@ export const ClientDashboard = ({
                 <button
                   type="button"
                   onClick={() => setShowBookingForm(false)}
-                  className="px-5 py-2.5 rounded bg-neutral-900 hover:bg-neutral-800 text-neutral-300 font-heading font-bold text-xs uppercase tracking-wider transition-colors"
+                  className="px-5 py-2.5 rounded bg-neutral-900 hover:bg-neutral-800 text-neutral-300 font-heading font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={bookingLoading || !fecha || !horario || !patente}
-                  className="px-6 py-2.5 rounded bg-red-600 hover:bg-red-700 active:scale-95 text-white font-heading font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-red-600/30 transition-all disabled:opacity-50"
+                  className="px-6 py-2.5 rounded bg-red-600 hover:bg-red-700 active:scale-95 text-white font-heading font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-red-600/30 transition-all disabled:opacity-50 cursor-pointer"
                 >
                   {bookingLoading ? (
                     <>
@@ -343,10 +651,10 @@ export const ClientDashboard = ({
         )}
 
         {/* Tab Controls */}
-        <div className="flex items-center gap-2 border-b border-neutral-800">
+        <div className="flex flex-wrap items-center gap-2 border-b border-neutral-800">
           <button
             onClick={() => setActiveTab('turnos')}
-            className={`flex items-center gap-2 px-5 py-3 font-heading font-black text-sm uppercase tracking-wider border-b-2 transition-all ${
+            className={`flex items-center gap-2 px-5 py-3 font-heading font-black text-sm uppercase tracking-wider border-b-2 transition-all cursor-pointer ${
               activeTab === 'turnos'
                 ? 'border-red-600 text-red-500'
                 : 'border-transparent text-neutral-400 hover:text-white'
@@ -357,8 +665,25 @@ export const ClientDashboard = ({
           </button>
 
           <button
+            onClick={() => setActiveTab('presupuestos')}
+            className={`flex items-center gap-2 px-5 py-3 font-heading font-black text-sm uppercase tracking-wider border-b-2 transition-all cursor-pointer ${
+              activeTab === 'presupuestos'
+                ? 'border-red-600 text-red-500'
+                : 'border-transparent text-neutral-400 hover:text-white'
+            }`}
+          >
+            <FileText className="w-4 h-4" />
+            <span>Mis Presupuestos ({presupuestos.length})</span>
+            {presupuestosPendientesCount > 0 && (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/40">
+                {presupuestosPendientesCount} pendiente{presupuestosPendientesCount > 1 ? 's' : ''}
+              </span>
+            )}
+          </button>
+
+          <button
             onClick={() => setActiveTab('historial')}
-            className={`flex items-center gap-2 px-5 py-3 font-heading font-black text-sm uppercase tracking-wider border-b-2 transition-all ${
+            className={`flex items-center gap-2 px-5 py-3 font-heading font-black text-sm uppercase tracking-wider border-b-2 transition-all cursor-pointer ${
               activeTab === 'historial'
                 ? 'border-red-600 text-red-500'
                 : 'border-transparent text-neutral-400 hover:text-white'
@@ -369,7 +694,9 @@ export const ClientDashboard = ({
           </button>
         </div>
 
-        {/* Tab 1: Scheduled appointments */}
+        {/* ========================================================================= */}
+        {/* TAB 1: SCHEDULED APPOINTMENTS */}
+        {/* ========================================================================= */}
         {activeTab === 'turnos' && (
           <div className="space-y-6">
             <div>
@@ -385,34 +712,80 @@ export const ClientDashboard = ({
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {turnosProgramados.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className="p-5 rounded-xl bg-neutral-900/90 border border-neutral-800 border-l-4 border-l-red-600 flex flex-col justify-between gap-3 shadow-lg"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <span className="font-mono text-base font-black text-white tracking-widest uppercase">
-                            🚗 {item.patente}
-                          </span>
-                          <div className="mt-2 text-xs text-neutral-300 space-y-1">
-                            <div className="flex items-center gap-1.5">
-                              <Calendar className="w-3.5 h-3.5 text-red-500" />
-                              <span>{String(item.fecha).replace("'", '')}</span>
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                              <Clock className="w-3.5 h-3.5 text-red-500" />
-                              <span>{String(item.horario).replace("'", '')} hs</span>
+                  {turnosProgramados.map((item, idx) => {
+                    // Check if this appointment already has an associated quote
+                    const presAsociado = presupuestos.find(
+                      (p) => p.patente.toUpperCase() === item.patente.toUpperCase() && p.estado !== 'rechazado'
+                    );
+
+                    return (
+                      <div
+                        key={idx}
+                        className="p-5 rounded-xl bg-neutral-900/90 border border-neutral-800 border-l-4 border-l-red-600 flex flex-col justify-between gap-3 shadow-lg"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <span className="font-mono text-base font-black text-white tracking-widest uppercase">
+                              🚗 {item.patente}
+                            </span>
+                            <div className="mt-2 text-xs text-neutral-300 space-y-1">
+                              <div className="flex items-center gap-1.5">
+                                <Calendar className="w-3.5 h-3.5 text-red-500" />
+                                <span className="font-mono text-white font-bold">{formatearFechaArgentina(item.fecha)}</span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <Clock className="w-3.5 h-3.5 text-red-500" />
+                                <span>{String(item.horario).replace("'", '')} hs</span>
+                              </div>
                             </div>
                           </div>
+
+                          <span className="text-[11px] font-heading font-bold uppercase tracking-wider px-2.5 py-1 rounded bg-red-950 text-red-400 border border-red-800/50">
+                            {item.estado}
+                          </span>
                         </div>
 
-                        <span className="text-[11px] font-heading font-bold uppercase tracking-wider px-2.5 py-1 rounded bg-red-950 text-red-400 border border-red-800/50">
-                          {item.estado}
-                        </span>
+                        {/* Presupuesto vinculado directo en el turno */}
+                        {presAsociado && (
+                          <div className="mt-2 p-3 rounded-lg bg-neutral-950 border border-neutral-800 flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5 text-xs text-white font-heading font-bold">
+                                <FileText className="w-3.5 h-3.5 text-red-500 shrink-0" />
+                                <span className="truncate">Cotización {presAsociado.numero}:</span>
+                                <span className="font-mono text-emerald-400 font-black">
+                                  ${presAsociado.total.toLocaleString('es-AR')}
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-neutral-400 uppercase font-semibold">
+                                Estado:{' '}
+                                <strong
+                                  className={
+                                    presAsociado.estado === 'aprobado'
+                                      ? 'text-blue-400'
+                                      : presAsociado.estado === 'facturado'
+                                      ? 'text-emerald-400'
+                                      : 'text-amber-400'
+                                  }
+                                >
+                                  {presAsociado.estado}
+                                </strong>
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveTab('presupuestos');
+                                setPresupuestoSeleccionadoModal(presAsociado);
+                              }}
+                              className="px-3 py-1.5 rounded bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white border border-red-600/40 text-xs font-heading font-bold uppercase tracking-wider transition-all cursor-pointer shrink-0"
+                            >
+                              Ver Detalle
+                            </button>
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -430,8 +803,8 @@ export const ClientDashboard = ({
                     >
                       <div>
                         <span className="font-mono font-bold text-neutral-300 uppercase">{item.patente}</span>
-                        <div className="text-neutral-500 mt-0.5">
-                          {String(item.fecha).replace("'", '')} · {String(item.horario).replace("'", '')} hs
+                        <div className="text-neutral-400 mt-0.5 font-mono">
+                          {formatearFechaArgentina(item.fecha)} · {String(item.horario).replace("'", '')} hs
                         </div>
                       </div>
                       <span className="text-[10px] font-heading uppercase text-neutral-400 px-2 py-0.5 rounded bg-neutral-900">
@@ -445,7 +818,188 @@ export const ClientDashboard = ({
           </div>
         )}
 
-        {/* Tab 2: Vehicle Service Clinic History */}
+        {/* ========================================================================= */}
+        {/* TAB 2: PRESUPUESTOS Y COTIZACIONES (NUEVO PARA EL CLIENTE) */}
+        {/* ========================================================================= */}
+        {activeTab === 'presupuestos' && (
+          <div className="space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="font-heading font-black text-white text-lg uppercase tracking-wide flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-red-500" />
+                  <span>Presupuestos y Cotizaciones de tus Vehículos</span>
+                </h3>
+                <p className="text-xs text-neutral-400 mt-0.5">
+                  Revisá el detalle de piezas y mano de obra para tu auto, aprobá la cotización online o consultá con Rodrigo.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={loadClientPresupuestos}
+                disabled={loadingPresupuestos}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-800 text-xs font-heading font-bold uppercase tracking-wider transition-all cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loadingPresupuestos ? 'animate-spin text-red-500' : 'text-neutral-400'}`} />
+                <span>Actualizar</span>
+              </button>
+            </div>
+
+            {loadingPresupuestos ? (
+              <div className="p-16 text-center text-neutral-400 text-xs">
+                <Loader2 className="w-8 h-8 animate-spin mx-auto mb-3 text-red-500" />
+                <span className="font-heading uppercase tracking-wider">Consultando presupuestos en el taller...</span>
+              </div>
+            ) : presupuestos.length === 0 ? (
+              <div className="p-10 rounded-xl bg-neutral-900/40 border border-neutral-800 text-center space-y-2">
+                <FileText className="w-10 h-10 text-neutral-600 mx-auto" />
+                <h4 className="font-heading font-bold text-white uppercase text-base">
+                  Aún no tenés cotizaciones cargadas
+                </h4>
+                <p className="text-xs text-neutral-400 max-w-md mx-auto">
+                  Cuando Rodrigo elabore un presupuesto para tu vehículo, vas a poder ver el desglose completo de repuestos y mano de obra acá mismo para aprobarlo.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {presupuestos.map((p) => {
+                  const estadoBadge = {
+                    pendiente: {
+                      bg: 'bg-amber-950/60 border-amber-800/80 text-amber-400',
+                      label: '🟡 Pendiente de Aprobación',
+                    },
+                    aprobado: {
+                      bg: 'bg-blue-950/60 border-blue-800/80 text-blue-400',
+                      label: '🔵 Aprobado por Vos',
+                    },
+                    facturado: {
+                      bg: 'bg-emerald-950/60 border-emerald-800/80 text-emerald-400',
+                      label: '🟢 Trabajo Concluido / Facturado',
+                    },
+                    rechazado: {
+                      bg: 'bg-neutral-900 border-neutral-700 text-neutral-400',
+                      label: '⚪ Rechazado / Vencido',
+                    },
+                  }[p.estado] || {
+                    bg: 'bg-neutral-900 border-neutral-700 text-neutral-400',
+                    label: p.estado,
+                  };
+
+                  return (
+                    <div
+                      key={p.id}
+                      className="p-5 rounded-xl bg-[#0a0a0a] border border-neutral-800 hover:border-neutral-700 transition-all shadow-xl flex flex-col justify-between space-y-4"
+                    >
+                      {/* Cabecera de la tarjeta */}
+                      <div className="border-b border-neutral-900 pb-3 flex items-start justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-black text-xs text-red-500 bg-red-950/50 border border-red-900/50 px-2 py-0.5 rounded">
+                              {p.numero}
+                            </span>
+                            <span className="font-mono text-base font-black text-white uppercase tracking-wider">
+                              {p.patente}
+                            </span>
+                          </div>
+                          {p.vehiculoModelo && (
+                            <p className="text-xs text-neutral-300 font-bold mt-1">
+                              🚘 {p.vehiculoModelo} {p.kilometraje ? `· ${p.kilometraje} km` : ''}
+                            </p>
+                          )}
+                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-neutral-400 mt-1">
+                            <span>📅 Emitido: <strong className="text-white font-mono">{formatearFechaArgentina(p.fecha)}</strong></span>
+                            <span className="text-neutral-600">·</span>
+                            <span>⏳ Válido hasta: <strong className="text-amber-400 font-mono">{calcularFechaVencimiento(p.fecha, p.validezDias || 7)}</strong> ({p.validezDias || 7} días)</span>
+                          </div>
+                        </div>
+
+                        <span className={`text-[10px] font-heading font-black uppercase tracking-wider px-2 py-1 rounded border shrink-0 ${estadoBadge.bg}`}>
+                          {estadoBadge.label}
+                        </span>
+                      </div>
+
+                      {/* Desglose de Items */}
+                      <div className="space-y-1.5 text-xs">
+                        <div className="text-[10px] uppercase font-bold text-neutral-500 tracking-wider">
+                          Detalle de Tareas y Repuestos ({p.items.length}):
+                        </div>
+                        <div className="space-y-1 max-h-32 overflow-y-auto pr-1">
+                          {p.items.map((it) => (
+                            <div key={it.id} className="flex items-center justify-between text-neutral-300 bg-neutral-950/60 p-1.5 rounded border border-neutral-900">
+                              <span className="truncate pr-2 text-[11px]">
+                                {it.tipo === 'mano_de_obra' ? '🛠️' : '🔩'} {it.cantidad > 1 ? `${it.cantidad}x ` : ''}
+                                {it.descripcion}
+                              </span>
+                              <span className="font-mono text-[11px] text-white font-bold shrink-0">
+                                ${it.subtotal.toLocaleString('es-AR')}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Total y Observaciones */}
+                      <div className="pt-3 border-t border-neutral-900 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-neutral-400 font-heading uppercase font-bold">
+                            Monto Total Presupuestado:
+                          </span>
+                          <span className="font-mono text-xl font-black text-emerald-400">
+                            ${p.total.toLocaleString('es-AR')}
+                          </span>
+                        </div>
+
+                        {/* Botones de Acción del Cliente */}
+                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                          {p.estado === 'pendiente' && (
+                            <button
+                              type="button"
+                              onClick={() => handleAprobarPresupuesto(p)}
+                              disabled={aprobandoId === p.id}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-heading font-black text-xs uppercase tracking-wider shadow-lg shadow-emerald-600/30 transition-all cursor-pointer disabled:opacity-50"
+                              title="Aprobar presupuesto para comenzar los trabajos"
+                            >
+                              {aprobandoId === p.id ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <Check className="w-3.5 h-3.5" />
+                              )}
+                              <span>Aprobar Presupuesto</span>
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => handleConsultarWhatsApp(p)}
+                            className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-[#25D366]/20 hover:bg-[#25D366] text-[#25D366] hover:text-black border border-[#25D366]/40 font-heading font-bold text-xs uppercase tracking-wider transition-all cursor-pointer"
+                            title="Consultar dudas con Rodrigo por WhatsApp"
+                          >
+                            <MessageCircle className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">Consultar</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => imprimirPresupuestoCliente(p)}
+                            className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-white border border-neutral-700 font-heading font-bold text-xs uppercase tracking-wider transition-all cursor-pointer"
+                            title="Ver e imprimir comprobante con membrete oficial"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                            <span>Imprimir / PDF</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB 3: VEHICLE SERVICE CLINIC HISTORY */}
+        {/* ========================================================================= */}
         {activeTab === 'historial' && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
@@ -461,7 +1015,7 @@ export const ClientDashboard = ({
               <button
                 onClick={loadClientHistory}
                 disabled={loadingHistorial}
-                className="text-xs text-red-400 hover:text-red-300 underline underline-offset-2 flex items-center gap-1 font-heading font-bold uppercase"
+                className="text-xs text-red-400 hover:text-red-300 underline underline-offset-2 flex items-center gap-1 font-heading font-bold uppercase cursor-pointer"
               >
                 {loadingHistorial ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Actualizar'}
               </button>
@@ -482,21 +1036,7 @@ export const ClientDashboard = ({
               </div>
             ) : (
               <div className="space-y-3">
-                {historialList.map((item, idx) => {
-                  let cleanFecha = item.fecha;
-                  if (cleanFecha.includes('GMT') || cleanFecha.includes('00:00:00')) {
-                    try {
-                      const d = new Date(cleanFecha);
-                      const dia = String(d.getDate()).padStart(2, '0');
-                      const mes = String(d.getMonth() + 1).padStart(2, '0');
-                      const anio = d.getFullYear();
-                      cleanFecha = `${dia}/${mes}/${anio}`;
-                    } catch (e) {
-                      cleanFecha = cleanFecha.substring(0, 10);
-                    }
-                  }
-
-                  return (
+                {historialList.map((item, idx) => (
                     <div
                       key={idx}
                       className="p-5 rounded-xl bg-neutral-900 border border-neutral-800 border-l-4 border-l-red-600 shadow-md space-y-3"
@@ -512,8 +1052,8 @@ export const ClientDashboard = ({
                             </span>
                           )}
                         </div>
-                        <span className="text-xs font-mono text-neutral-400">
-                          📅 {cleanFecha}
+                        <span className="text-xs font-mono text-neutral-300 font-bold">
+                          📅 {formatearFechaArgentina(item.fecha)}
                         </span>
                       </div>
 
@@ -542,13 +1082,152 @@ export const ClientDashboard = ({
                         </div>
                       </div>
                     </div>
-                  );
-                })}
+                  ))}
               </div>
             )}
           </div>
         )}
       </div>
+
+      {/* ========================================================================= */}
+      {/* MODAL: VER DETALLE DEL PRESUPUESTO (EN CASO DE POPUP BLOQUEADO) */}
+      {/* ========================================================================= */}
+      {presupuestoSeleccionadoModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/90 backdrop-blur-sm animate-in fade-in duration-200 overflow-y-auto">
+          <div className="relative w-full max-w-2xl bg-[#0d0d0d] border-2 border-red-600 rounded-xl shadow-2xl overflow-hidden my-auto max-h-[90vh] flex flex-col">
+            {/* Header del modal */}
+            <div className="p-5 border-b border-neutral-800 bg-[#0a0a0a] flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2">
+                <FileText className="w-5 h-5 text-red-500" />
+                <span className="font-heading font-black text-sm text-white uppercase tracking-wider">
+                  Detalle del Presupuesto {presupuestoSeleccionadoModal.numero}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPresupuestoSeleccionadoModal(null)}
+                className="text-neutral-400 hover:text-white p-1 rounded-lg hover:bg-neutral-800 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Contenido scrollable */}
+            <div className="p-6 space-y-5 overflow-y-auto flex-1 text-xs">
+              {/* Taller info */}
+              <div className="p-4 rounded-lg bg-neutral-950 border border-neutral-800 space-y-1">
+                <h4 className="font-heading font-black text-white text-sm uppercase">LA CASA DE LA DIRECCIÓN</h4>
+                <p className="text-neutral-400">📍 Av. San Juan e Independencia, General Alvear, Mendoza</p>
+                <p className="text-neutral-400">📞 WhatsApp Oficial: 2625 532070</p>
+              </div>
+
+              {/* Vehículo y estado */}
+              <div className="grid grid-cols-2 gap-3 p-4 rounded-lg bg-neutral-900 border border-neutral-800">
+                <div>
+                  <span className="text-neutral-500 block uppercase font-bold text-[10px]">Vehículo / Patente</span>
+                  <span className="font-mono text-white text-sm font-bold">
+                    {presupuestoSeleccionadoModal.patente} · {presupuestoSeleccionadoModal.vehiculoModelo || 'Vehículo'}
+                  </span>
+                  {presupuestoSeleccionadoModal.kilometraje && (
+                    <span className="text-neutral-400 block mt-0.5">Km: {presupuestoSeleccionadoModal.kilometraje} km</span>
+                  )}
+                </div>
+                <div className="text-right">
+                  <span className="text-neutral-500 block uppercase font-bold text-[10px]">Estado Actual</span>
+                  <span className="font-heading font-black text-sm uppercase text-amber-400">
+                    {presupuestoSeleccionadoModal.estado}
+                  </span>
+                  <span className="text-neutral-300 block mt-1 font-mono text-[11px]">
+                    📅 Emisión: <strong className="text-white">{formatearFechaArgentina(presupuestoSeleccionadoModal.fecha)}</strong>
+                  </span>
+                  <span className="text-amber-400 block mt-0.5 font-mono text-[11px]">
+                    ⏳ Válido hasta: {calcularFechaVencimiento(presupuestoSeleccionadoModal.fecha, presupuestoSeleccionadoModal.validezDias || 7)} ({presupuestoSeleccionadoModal.validezDias || 7} días)
+                  </span>
+                </div>
+              </div>
+
+              {/* Tabla de Trabajos */}
+              <div className="space-y-2">
+                <span className="font-heading font-bold text-neutral-400 uppercase tracking-wider block">
+                  Items y Repuestos Cotizados:
+                </span>
+                <div className="border border-neutral-800 rounded-lg overflow-hidden">
+                  <table className="w-full text-left">
+                    <thead className="bg-neutral-950 text-neutral-400 uppercase text-[10px] font-heading font-bold">
+                      <tr>
+                        <th className="p-2.5">Descripción</th>
+                        <th className="p-2.5 text-center">Cant.</th>
+                        <th className="p-2.5 text-right">Precio</th>
+                        <th className="p-2.5 text-right">Subtotal</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-neutral-900 font-mono">
+                      {presupuestoSeleccionadoModal.items.map((it) => (
+                        <tr key={it.id}>
+                          <td className="p-2.5 text-neutral-200">
+                            {it.tipo === 'mano_de_obra' ? '🛠️' : '🔩'} {it.descripcion}
+                          </td>
+                          <td className="p-2.5 text-center text-neutral-400">{it.cantidad}</td>
+                          <td className="p-2.5 text-right text-neutral-400">${it.precioUnitario.toLocaleString('es-AR')}</td>
+                          <td className="p-2.5 text-right text-white font-bold">${it.subtotal.toLocaleString('es-AR')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Total destacado */}
+              <div className="p-4 rounded-xl bg-red-950/30 border border-red-800/60 flex items-center justify-between">
+                <span className="font-heading font-black text-white uppercase text-sm">
+                  Total Final a Abonar:
+                </span>
+                <span className="font-mono text-2xl font-black text-emerald-400">
+                  ${presupuestoSeleccionadoModal.total.toLocaleString('es-AR')}
+                </span>
+              </div>
+
+              {presupuestoSeleccionadoModal.observaciones && (
+                <p className="text-neutral-400 text-[11px] italic bg-neutral-950 p-3 rounded border border-neutral-900">
+                  💡 {presupuestoSeleccionadoModal.observaciones}
+                </p>
+              )}
+            </div>
+
+            {/* Footer con acciones */}
+            <div className="p-4 border-t border-neutral-800 bg-[#0a0a0a] flex flex-wrap items-center justify-end gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => imprimirPresupuestoCliente(presupuestoSeleccionadoModal)}
+                className="px-4 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-white font-heading font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Imprimir / PDF</span>
+              </button>
+
+              {presupuestoSeleccionadoModal.estado === 'pendiente' && (
+                <button
+                  type="button"
+                  onClick={() => handleAprobarPresupuesto(presupuestoSeleccionadoModal)}
+                  disabled={aprobandoId === presupuestoSeleccionadoModal.id}
+                  className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-heading font-black text-xs uppercase tracking-wider flex items-center gap-1.5 shadow-lg shadow-emerald-600/30 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Aprobar Presupuesto</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setPresupuestoSeleccionadoModal(null)}
+                className="px-4 py-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-300 font-heading font-bold text-xs uppercase tracking-wider cursor-pointer"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

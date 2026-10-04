@@ -39,53 +39,8 @@ interface PresupuestosManagerProps {
 
 const STORAGE_KEY = 'taller_presupuestos_v1';
 
-// Helper para formatear fechas al estándar argentino DD/MM/AAAA
-export const formatearFechaArgentina = (fechaStr?: string): string => {
-  if (!fechaStr) return '';
-  const clean = String(fechaStr).replace("'", '').trim();
-  if (/^\d{2}\/\d{2}\/\d{4}$/.test(clean)) {
-    return clean;
-  }
-  if (/^\d{4}-\d{2}-\d{2}/.test(clean)) {
-    const [y, m, d] = clean.split('T')[0].split('-');
-    return `${d}/${m}/${y}`;
-  }
-  try {
-    const d = new Date(clean + (clean.includes('T') ? '' : 'T00:00:00'));
-    if (!isNaN(d.getTime())) {
-      const dia = String(d.getDate()).padStart(2, '0');
-      const mes = String(d.getMonth() + 1).padStart(2, '0');
-      const anio = d.getFullYear();
-      return `${dia}/${mes}/${anio}`;
-    }
-  } catch (e) {}
-  return clean;
-};
-
-// Helper para calcular la fecha de vencimiento según la validez en días
-export const calcularFechaVencimiento = (fechaStr?: string, validezDias = 7): string => {
-  if (!fechaStr) return '';
-  try {
-    const clean = String(fechaStr).replace("'", '').trim();
-    let baseDate: Date;
-    if (/^\d{4}-\d{2}-\d{2}/.test(clean)) {
-      const [y, m, d] = clean.split('T')[0].split('-');
-      baseDate = new Date(Number(y), Number(m) - 1, Number(d));
-    } else if (/^\d{2}\/\d{2}\/\d{4}/.test(clean)) {
-      const [d, m, y] = clean.split('/');
-      baseDate = new Date(Number(y), Number(m) - 1, Number(d));
-    } else {
-      baseDate = new Date();
-    }
-    baseDate.setDate(baseDate.getDate() + (Number(validezDias) || 7));
-    const dia = String(baseDate.getDate()).padStart(2, '0');
-    const mes = String(baseDate.getMonth() + 1).padStart(2, '0');
-    const anio = baseDate.getFullYear();
-    return `${dia}/${mes}/${anio}`;
-  } catch (e) {
-    return '';
-  }
-};
+export { formatearFechaArgentina, calcularFechaVencimiento } from '../utils/dateFormatter';
+import { formatearFechaArgentina, calcularFechaVencimiento } from '../utils/dateFormatter';
 
 export const PresupuestosManager = ({
   turnosPendientes,
@@ -1255,7 +1210,7 @@ export const PresupuestosManager = ({
                       <option value="">-- Seleccionar un turno agendado de la lista --</option>
                       {turnosPendientes.map((tp, idx) => (
                         <option key={idx} value={tp.patente}>
-                          {tp.patente} — {tp.nombre ? `${tp.nombre} · ` : ''}{tp.fecha} {tp.horario}hs ({tp.telefono || tp.email})
+                          {tp.patente} — {tp.nombre ? `${tp.nombre} · ` : ''}{formatearFechaArgentina(tp.fecha)} {tp.horario}hs ({tp.telefono || tp.email})
                         </option>
                       ))}
                     </select>

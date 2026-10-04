@@ -3,6 +3,7 @@ import { TurnoAdmin, DatosTrabajoAdmin, MovimientoContable, Presupuesto } from '
 import { gasApi } from '../services/gasApi';
 import { WORKSHOP_ITEMS, GASTOS_PREDEFINIDOS } from '../constants/workshopItems';
 import { PresupuestosManager } from './PresupuestosManager';
+import { formatearFechaArgentina } from '../utils/dateFormatter';
 import {
   ShieldAlert,
   Search,
@@ -239,13 +240,7 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
   });
 
   const formatearFechaParaBoton = (fechaStr: string): string => {
-    if (!fechaStr) return '';
-    try {
-      const [y, m, d] = fechaStr.split('-');
-      return `${d}/${m}/${y}`;
-    } catch {
-      return fechaStr;
-    }
+    return formatearFechaArgentina(fechaStr);
   };
 
   // Financial calculations
@@ -1582,8 +1577,8 @@ function doOptions(e) {
                             </div>
                             <div className="mt-2 text-xs text-neutral-400 space-y-1">
                               <div className="flex items-center gap-1.5">
-                                <Calendar className="w-3.5 h-3.5 text-neutral-500" />
-                                <span>{String(turno.fecha).replace("'", '')}</span>
+                                <Calendar className="w-3.5 h-3.5 text-red-500" />
+                                <span className="font-mono text-white font-bold">{formatearFechaArgentina(turno.fecha)}</span>
                               </div>
                               <div className="flex items-center gap-1.5">
                                 <Clock className="w-3.5 h-3.5 text-neutral-500" />
@@ -1884,8 +1879,8 @@ function doOptions(e) {
                           const isIngreso = m.tipo === 'ingreso';
                           return (
                             <tr key={m.id} className="hover:bg-neutral-900/60 transition-colors">
-                              <td className="py-3 px-4 font-mono text-neutral-300 whitespace-nowrap">
-                                {m.fecha}
+                              <td className="py-3 px-4 font-mono text-neutral-200 whitespace-nowrap font-bold">
+                                {formatearFechaArgentina(m.fecha)}
                               </td>
                               <td className="py-3 px-4 whitespace-nowrap">
                                 <span
