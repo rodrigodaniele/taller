@@ -1,4 +1,4 @@
-import { useState, useEffect, useId, useTransition } from 'react';
+import { useState, useEffect, useId, useTransition, useRef } from 'react';
 import { TurnoAdmin, DatosTrabajoAdmin, MovimientoContable, Presupuesto } from '../types';
 import { gasApi } from '../services/gasApi';
 import { WORKSHOP_ITEMS, GASTOS_PREDEFINIDOS } from '../constants/workshopItems';
@@ -57,7 +57,9 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
   // --- Contabilidad state ---
   const [movimientos, setMovimientos] = useState<MovimientoContable[]>([]);
   const [loadingContabilidad, setLoadingContabilidad] = useState(false);
-  const [filtroPeriodo, setFiltroPeriodo] = useState<'todos' | 'mes' | 'semana' | 'hoy'>('mes');
+  const [filtroPeriodo, setFiltroPeriodo] = useState<'todos' | 'mes' | 'semana' | 'hoy' | 'dia'>('mes');
+  const [fechaPersonalizada, setFechaPersonalizada] = useState<string>('');
+  const datePickerRef = useRef<HTMLInputElement>(null);
   const [filtroTipo, setFiltroTipo] = useState<'todos' | 'ingreso' | 'gasto'>('todos');
   const [filtroBusquedaContable, setFiltroBusquedaContable] = useState('');
 
@@ -201,6 +203,25 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
         );
       }
 
+      if (filtroPeriodo === 'dia' && fechaPersonalizada) {
+        const cleanFecha = String(m.fecha).replace("'", '').trim().split('T')[0];
+        if (cleanFecha === fechaPersonalizada) return true;
+        const targetParts = fechaPersonalizada.split('-');
+        if (targetParts.length >= 3) {
+          const targetDate = new Date(
+            parseInt(targetParts[0], 10),
+            parseInt(targetParts[1], 10) - 1,
+            parseInt(targetParts[2], 10)
+          );
+          return (
+            movDate.getFullYear() === targetDate.getFullYear() &&
+            movDate.getMonth() === targetDate.getMonth() &&
+            movDate.getDate() === targetDate.getDate()
+          );
+        }
+        return false;
+      }
+
       if (filtroPeriodo === 'semana') {
         const diffTime = Math.abs(now.getTime() - movDate.getTime());
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
@@ -216,6 +237,16 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
 
     return true;
   });
+
+  const formatearFechaParaBoton = (fechaStr: string): string => {
+    if (!fechaStr) return '';
+    try {
+      const [y, m, d] = fechaStr.split('-');
+      return `${d}/${m}/${y}`;
+    } catch {
+      return fechaStr;
+    }
+  };
 
   // Financial calculations
   const totalIngresos = filteredMovimientos
@@ -1661,7 +1692,7 @@ function doOptions(e) {
             {/* Filter controls */}
             <div className="p-4 rounded-xl bg-neutral-950 border border-neutral-800 flex flex-wrap items-center justify-between gap-4">
               {/* Period tabs */}
-              <div className="flex items-center gap-1.5 p-1 bg-neutral-900 rounded-lg text-xs font-heading font-bold uppercase">
+              <div className="flex flex-wrap items-center gap-1.5 p-1 bg-neutral-900 rounded-lg text-xs font-heading font-bold uppercase">
                 <button
                   onClick={() => setFiltroPeriodo('hoy')}
                   className={`px-3 py-1.5 rounded transition-colors ${
@@ -1694,6 +1725,46 @@ function doOptions(e) {
                 >
                   Histórico Todo
                 </button>
+
+                {/* Botón con almanaque para elegir fecha puntual */}
+                <div className="relative inline-flex items-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      try {
+                        datePickerRef.current?.showPicker?.();
+                      } catch {
+                        datePickerRef.current?.focus();
+                      }
+                    }}
+                    className={`px-3 py-1.5 rounded transition-all flex items-center gap-1.5 cursor-pointer ${
+                      filtroPeriodo === 'dia'
+                        ? 'bg-red-600 text-white font-black shadow-sm'
+                        : 'text-neutral-400 hover:text-white'
+                    }`}
+                    title="Hacer clic para abrir el almanaque y elegir una fecha puntual"
+                  >
+                    <Calendar className="w-3.5 h-3.5" />
+                    <span>
+                      {filtroPeriodo === 'dia' && fechaPersonalizada
+                        ? `Día: ${formatearFechaParaBoton(fechaPersonalizada)}`
+                        : 'Elegir Día 📅'}
+                    </span>
+                  </button>
+                  <input
+                    ref={datePickerRef}
+                    type="date"
+                    value={fechaPersonalizada}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        setFechaPersonalizada(e.target.value);
+                        setFiltroPeriodo('dia');
+                      }
+                    }}
+                    className="absolute inset-0 opacity-0 pointer-events-auto cursor-pointer w-full h-full"
+                    title="Elegir día en el almanaque"
+                  />
+                </div>
               </div>
 
               {/* Type selector */}
