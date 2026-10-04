@@ -15,6 +15,7 @@ export interface HistorialServicio {
   fecha: string;
   horario: string;
   patente: string;
+  modelo?: string;
   kilometraje: string;
   trabajo: string;
   monto: string;

@@ -502,9 +502,16 @@ export const ClientDashboard = ({
                       className="p-5 rounded-xl bg-neutral-900 border border-neutral-800 border-l-4 border-l-red-600 shadow-md space-y-3"
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-800/80 pb-2">
-                        <span className="font-heading font-black text-sm text-white uppercase tracking-wider">
-                          🚗 Patente: <span className="text-red-500 font-mono">{item.patente}</span>
-                        </span>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-heading font-black text-sm text-white uppercase tracking-wider">
+                            🚗 Patente: <span className="text-red-500 font-mono">{item.patente}</span>
+                          </span>
+                          {item.modelo && (
+                            <span className="px-2.5 py-0.5 rounded bg-red-950/60 border border-red-800/70 text-white font-heading font-bold text-xs uppercase tracking-wider shadow-sm">
+                              🚘 {item.modelo}
+                            </span>
+                          )}
+                        </div>
                         <span className="text-xs font-mono text-neutral-400">
                           📅 {cleanFecha}
                         </span>

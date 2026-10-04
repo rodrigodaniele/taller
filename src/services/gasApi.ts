@@ -263,5 +263,12 @@ export const gasApi = {
       return { success: true };
     }
   },
+
+  async facturarPresupuestoYArchivar(presupuesto: any): Promise<{ success: boolean; error?: string }> {
+    return callGasApi({
+      accion: 'facturarPresupuestoYArchivar',
+      presupuesto,
+    });
+  },
 };
 

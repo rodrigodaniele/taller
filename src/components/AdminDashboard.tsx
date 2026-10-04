@@ -356,6 +356,13 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
     }
   };
 
+  // Quitar turno atendido desde presupuestos al facturar
+  const handleTurnoAtendido = (patente: string) => {
+    const cleanPat = patente.trim().toUpperCase();
+    setTurnos((prev) => prev.filter((t) => t.patente.trim().toUpperCase() !== cleanPat));
+    fetchTurnos();
+  };
+
   // Query real-time slot availability for counter turnos
   const handleMostradorDateChange = async (selectedDate: string) => {
     setMostradorFecha(selectedDate);
@@ -857,6 +864,12 @@ function doPost(e) {
       var resMostrador = registrarTurnoMostrador(datos);
       return ContentService.createTextOutput(JSON.stringify(resMostrador)).setMimeType(ContentService.MimeType.JSON);
     }
+
+    // --- ACCIÓN 16: FACTURAR PRESUPUESTO Y ARCHIVAR EN DETALLES_TURNOS ---
+    if (datos.accion === "facturarPresupuestoYArchivar") {
+      var resFact = registrarTrabajoDesdePresupuesto(datos.presupuesto);
+      return ContentService.createTextOutput(JSON.stringify(resFact)).setMimeType(ContentService.MimeType.JSON);
+    }
                            
   } catch(error) {
     return ContentService.createTextOutput(JSON.stringify({"resultado": "error", "mensaje": error.toString()})).setMimeType(ContentService.MimeType.JSON);
@@ -1165,16 +1178,84 @@ function registrarTurnoMostrador(d) {
   return { success: true, mensaje: "Turno y usuario creados exitosamente." };
 }
 
+function registrarTrabajoDesdePresupuesto(p) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetTurnos = ss.getSheetByName("Turnos");
+  var sheetDetalles = ss.getSheetByName("Detalles_Turnos") || ss.insertSheet("Detalles_Turnos");
+  
+  if (sheetDetalles.getLastRow() === 0) {
+    sheetDetalles.appendRow(["Email", "Fecha", "Horario", "Patente", "Modelo", "Kilometraje", "Trabajo Realizado", "Monto Final", "NroPresupuesto"]);
+  }
+  
+  var emailCliente = p.clienteEmail ? p.clienteEmail.toString().trim().toLowerCase() : (p.patente ? (p.patente.toString().trim().toLowerCase() + "@cliente.taller") : "");
+  var fechaFmt = p.fecha ? p.fecha.toString().replace("'", "") : new Date().toISOString().split('T')[0];
+  var horaFmt = p.horario || "";
+  var patenteFmt = p.patente ? p.patente.toString().trim().toUpperCase() : "";
+  var modeloFmt = p.vehiculoModelo ? p.vehiculoModelo.toString().trim() : "";
+  var kmFmt = p.kilometraje ? p.kilometraje.toString().trim() : "";
+
+  // Desglose de los items y repuestos presupuestados
+  var trabajoResumen = "";
+  if (Array.isArray(p.items) && p.items.length > 0) {
+    trabajoResumen = p.items.map(function(it) {
+      var cant = (it.cantidad && Number(it.cantidad) > 1) ? (it.cantidad + "x ") : "";
+      return cant + it.descripcion;
+    }).join(" + ");
+  } else {
+    trabajoResumen = p.observaciones || "Servicio Integral Taller";
+  }
+
+  var montoFmt = Number(p.total) || 0;
+  var nroPres = p.numero || "";
+
+  sheetDetalles.appendRow([
+    emailCliente,
+    "'" + fechaFmt,
+    horaFmt ? ("'" + horaFmt) : "",
+    patenteFmt,
+    modeloFmt,
+    kmFmt,
+    trabajoResumen,
+    montoFmt,
+    nroPres
+  ]);
+
+  // Actualizar el turno en hoja 'Turnos' a 'Atendido'
+  if (sheetTurnos) {
+    var datosTurnos = sheetTurnos.getDataRange().getValues();
+    for (var i = 1; i < datosTurnos.length; i++) {
+      var patFila = datosTurnos[i][3] ? datosTurnos[i][3].toString().trim().toUpperCase() : "";
+      if (patFila === patenteFmt && datosTurnos[i][4] && datosTurnos[i][4].toString().toLowerCase() === "programado") {
+        sheetTurnos.getRange(i + 1, 5).setValue("Atendido");
+        break;
+      }
+    }
+  }
+
+  ejecutarLimpiezaYOrdenamientoCompleto();
+  return { success: true };
+}
+
 function registrarTrabajoAdmin(datosTrabajo) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheetTurnos = ss.getSheetByName("Turnos");
   var sheetDetalles = ss.getSheetByName("Detalles_Turnos") || ss.insertSheet("Detalles_Turnos");
   
   if (sheetDetalles.getLastRow() === 0) {
-    sheetDetalles.appendRow(["Email", "Fecha", "Horario", "Patente", "Kilometraje", "Trabajo Realizado", "Monto Final"]);
+    sheetDetalles.appendRow(["Email", "Fecha", "Horario", "Patente", "Modelo", "Kilometraje", "Trabajo Realizado", "Monto Final", "NroPresupuesto"]);
   }
   
-  sheetDetalles.appendRow([datosTrabajo.email, datosTrabajo.fecha, datosTrabajo.horario, datosTrabajo.patente, datosTrabajo.kilometraje, datosTrabajo.trabajoRealizado, datosTrabajo.montoFinal]);
+  sheetDetalles.appendRow([
+    datosTrabajo.email,
+    datosTrabajo.fecha,
+    datosTrabajo.horario,
+    datosTrabajo.patente,
+    datosTrabajo.modelo || "",
+    datosTrabajo.kilometraje,
+    datosTrabajo.trabajoRealizado,
+    datosTrabajo.montoFinal,
+    ""
+  ]);
   
   if (sheetTurnos) {
     var datosTurnos = sheetTurnos.getDataRange().getValues();
@@ -1197,14 +1278,34 @@ function obtenerHistorialCliente(emailCliente) {
   var historialUsuario = [];
   
   for (var i = 1; i < datos.length; i++) {
-    if (datos[i][0].toString().toLowerCase().trim() === emailCliente.toLowerCase().trim()) {
+    var emailFila = datos[i][0] ? datos[i][0].toString().toLowerCase().trim() : "";
+    if (emailFila === emailCliente.toLowerCase().trim()) {
+      var tieneColumnaModelo = datos[0] && datos[0].length >= 8 && datos[0][4] && datos[0][4].toString().toLowerCase().indexOf("modelo") !== -1;
+      var modeloVal = "";
+      var kmVal = "";
+      var trabajoVal = "";
+      var montoVal = "";
+
+      if (tieneColumnaModelo) {
+        modeloVal = datos[i][4] ? datos[i][4].toString() : "";
+        kmVal = datos[i][5] ? datos[i][5].toString() : "";
+        trabajoVal = datos[i][6] ? datos[i][6].toString() : "";
+        montoVal = datos[i][7] ? datos[i][7].toString() : "";
+      } else {
+        kmVal = datos[i][4] ? datos[i][4].toString() : "";
+        trabajoVal = datos[i][5] ? datos[i][5].toString() : "";
+        montoVal = datos[i][6] ? datos[i][6].toString() : "";
+        if (datos[i][7]) modeloVal = datos[i][7].toString();
+      }
+
       historialUsuario.push({
-        fecha: datos[i][1].toString().replace("'", ""),
-        horario: datos[i][2].toString(),
-        patente: datos[i][3].toString().toUpperCase(),
-        kilometraje: datos[i][4].toString(),
-        trabajo: datos[i][5].toString(),
-        monto: datos[i][6].toString()
+        fecha: datos[i][1] ? datos[i][1].toString().replace("'", "") : "",
+        horario: datos[i][2] ? datos[i][2].toString() : "",
+        patente: datos[i][3] ? datos[i][3].toString().toUpperCase() : "",
+        modelo: modeloVal,
+        kilometraje: kmVal,
+        trabajo: trabajoVal,
+        monto: montoVal
       });
     }
   }
@@ -1413,105 +1514,72 @@ function doOptions(e) {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {filteredTurnos.map((turno, idx) => (
-                    <div
-                      key={idx}
-                      onClick={() => {
-                        setSelectedTurno(turno);
-                        setKilometraje('');
-                        setSelectedServicios([]);
-                        setNotasTrabajoAdicional('');
-                        setMontoCobrado('');
-                        setAutoRegistrarContabilidad(true);
-                      }}
-                      className="group p-5 rounded-xl bg-[#0a0a0a] border border-neutral-800 border-l-4 border-l-red-600 hover:border-red-600 hover:bg-neutral-900/90 transition-all cursor-pointer shadow-lg flex flex-col justify-between gap-4"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <Car className="w-4 h-4 text-red-500" />
-                            <span className="font-mono text-lg font-black text-white uppercase tracking-wider group-hover:text-red-400 transition-colors">
-                              {turno.patente}
-                            </span>
-                          </div>
-                          <div className="mt-2 text-xs text-neutral-400 space-y-1">
-                            <div className="flex items-center gap-1.5">
-                              <Calendar className="w-3.5 h-3.5 text-neutral-500" />
-                              <span>{String(turno.fecha).replace("'", '')}</span>
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                              <Clock className="w-3.5 h-3.5 text-neutral-500" />
-                              <span className="text-white font-semibold">
-                                {String(turno.horario).replace("'", '')} hs
+                  {filteredTurnos.map((turno, idx) => {
+                    const cleanTurnoPat = String(turno.patente || '').trim().toUpperCase();
+                    const presupuestoExistente = presupuestos.find(
+                      (p) => p.patente.trim().toUpperCase() === cleanTurnoPat && p.estado !== 'rechazado'
+                    );
+
+                    return (
+                      <div
+                        key={idx}
+                        className="p-5 rounded-xl bg-[#0a0a0a] border border-neutral-800 border-l-4 border-l-red-600 hover:border-neutral-700 transition-all shadow-lg flex flex-col justify-between gap-4"
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <Car className="w-4 h-4 text-red-500" />
+                              <span className="font-mono text-lg font-black text-white uppercase tracking-wider">
+                                {turno.patente}
                               </span>
                             </div>
-                            <div className="flex items-center gap-1.5">
-                              <Mail className="w-3.5 h-3.5 text-neutral-500" />
-                              <span className="truncate max-w-[200px]">{turno.email}</span>
+                            <div className="mt-2 text-xs text-neutral-400 space-y-1">
+                              <div className="flex items-center gap-1.5">
+                                <Calendar className="w-3.5 h-3.5 text-neutral-500" />
+                                <span>{String(turno.fecha).replace("'", '')}</span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <Clock className="w-3.5 h-3.5 text-neutral-500" />
+                                <span className="text-white font-semibold">
+                                  {String(turno.horario).replace("'", '')} hs
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <Mail className="w-3.5 h-3.5 text-neutral-500" />
+                                <span className="truncate max-w-[200px]">{turno.email}</span>
+                              </div>
                             </div>
                           </div>
-                        </div>
 
-                        <div className="shrink-0 flex flex-col sm:flex-row items-end sm:items-center gap-2 pt-2 sm:pt-0">
-                          {(() => {
-                            const cleanTurnoPat = String(turno.patente || '').trim().toUpperCase();
-                            const presupuestoExistente = presupuestos.find(
-                              (p) => p.patente.trim().toUpperCase() === cleanTurnoPat && p.estado !== 'rechazado'
-                            );
-
-                            if (presupuestoExistente) {
-                              return (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setActiveAdminTab('presupuestos');
-                                  }}
-                                  className="px-3 py-1.5 rounded bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-600/80 text-emerald-300 text-xs font-heading font-bold uppercase tracking-wider flex items-center gap-1.5 transition-colors cursor-pointer"
-                                  title={`Ya cuenta con el presupuesto ${presupuestoExistente.numero} por $${presupuestoExistente.total.toLocaleString('es-AR')}`}
-                                >
-                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                                  <span>✓ {presupuestoExistente.numero}</span>
-                                </button>
-                              );
-                            }
-
-                            return (
+                          <div className="shrink-0 flex items-center gap-2 pt-2 sm:pt-0">
+                            {presupuestoExistente ? (
                               <button
                                 type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
+                                onClick={() => setActiveAdminTab('presupuestos')}
+                                className="px-4 py-2.5 rounded-lg bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-600/80 text-emerald-300 text-xs font-heading font-bold uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer shadow-md"
+                                title={`Ver presupuesto ${presupuestoExistente.numero} ($${presupuestoExistente.total.toLocaleString('es-AR')})`}
+                              >
+                                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                                <span>Presupuesto {presupuestoExistente.numero} (${presupuestoExistente.total.toLocaleString('es-AR')})</span>
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
                                   setTurnoParaPresupuesto(turno);
                                   setActiveAdminTab('presupuestos');
                                 }}
-                                className="px-3 py-1.5 rounded bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-neutral-300 hover:text-white text-xs font-heading font-bold uppercase tracking-wider flex items-center gap-1.5 transition-colors cursor-pointer"
+                                className="px-4 py-2.5 rounded-lg bg-red-600 hover:bg-red-700 active:scale-95 text-white text-xs font-heading font-black uppercase tracking-wider flex items-center gap-2 transition-all shadow-md shadow-red-950 cursor-pointer"
                               >
-                                <FileText className="w-3.5 h-3.5 text-red-500" />
-                                <span>Presupuestar</span>
+                                <FileText className="w-4 h-4" />
+                                <span>+ Crear Presupuesto / Cotización</span>
                               </button>
-                            );
-                          })()}
-
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedTurno(turno);
-                              setKilometraje('');
-                              setSelectedServicios([]);
-                              setNotasTrabajoAdicional('');
-                              setMontoCobrado('');
-                              setAutoRegistrarContabilidad(true);
-                            }}
-                            className="px-3 py-1.5 rounded bg-red-600 hover:bg-red-700 text-white text-xs font-heading font-black uppercase tracking-wider flex items-center gap-1.5 transition-colors shadow-md shadow-red-950 cursor-pointer"
-                          >
-                            <Wrench className="w-3.5 h-3.5" />
-                            <span>Cargar Trabajo</span>
-                          </button>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -1525,6 +1593,7 @@ function doOptions(e) {
             presupuestosList={presupuestos}
             onPresupuestosUpdated={setPresupuestos}
             onRegistrarIngresoCaja={handleRegistrarIngresoDesdePresupuesto}
+            onTurnoAtendido={handleTurnoAtendido}
             onShowToast={onShowToast}
             initialTurnoParaPresupuestar={turnoParaPresupuesto}
             onClearInitialTurno={() => setTurnoParaPresupuesto(null)}
@@ -1806,210 +1875,6 @@ function doOptions(e) {
                   {fullAppsScriptCode}
                 </pre>
               </div>
-            </div>
-          </div>
-        )}
-
-        {/* MODAL: REGISTRAR REPARACIÓN DE UN TURNO */}
-        {selectedTurno && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/90 backdrop-blur-sm animate-in fade-in duration-200 overflow-y-auto">
-            <div className="relative w-full max-w-lg bg-[#0a0a0a] border-2 border-red-600 rounded-xl shadow-2xl flex flex-col max-h-[92vh] sm:max-h-[88vh] my-auto overflow-hidden">
-              {/* Header fijo superior */}
-              <div className="relative p-5 sm:p-6 pb-4 border-b border-neutral-800 bg-[#0a0a0a] shrink-0">
-                <button
-                  onClick={() => setSelectedTurno(null)}
-                  className="absolute top-4 right-4 text-neutral-400 hover:text-white p-1 rounded-lg hover:bg-neutral-900 transition-colors"
-                  aria-label="Cerrar modal"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-
-                <div className="flex items-center gap-2 text-red-500 mb-1">
-                  <Wrench className="w-5 h-5" />
-                  <span className="font-heading font-black text-xs uppercase tracking-widest">
-                    Ficha Técnica de Reparación
-                  </span>
-                </div>
-
-                <h2 className="font-heading font-black text-xl text-white uppercase tracking-tight">
-                  Registrar Trabajo en Vehículo
-                </h2>
-
-                <div className="mt-3 p-3 rounded-lg bg-neutral-950 border border-neutral-800 text-xs space-y-1">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <span className="text-neutral-400">Patente: </span>
-                      <strong className="text-white font-mono uppercase text-sm">{selectedTurno.patente}</strong>
-                    </div>
-                    <div className="text-neutral-400">
-                      <span>{String(selectedTurno.fecha).replace("'", '')} — {selectedTurno.horario} hs</span>
-                    </div>
-                  </div>
-                  <div>
-                    <span className="text-neutral-400">Cliente: </span>
-                    <span className="text-white font-mono text-[11px]">{selectedTurno.email}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Formulario con cuerpo scrolleable */}
-              <form onSubmit={handleSaveWork} className="flex flex-col flex-1 min-h-0 overflow-hidden">
-                <div className="overflow-y-auto p-5 sm:p-6 space-y-4 flex-1 overscroll-contain">
-                  <div>
-                    <label htmlFor={kmInputId} className="block text-xs font-heading font-bold uppercase tracking-wider text-neutral-300 mb-1">
-                      1. Kilometraje Actual
-                    </label>
-                    <input
-                      id={kmInputId}
-                      type="number"
-                      required
-                      placeholder="Ej: 145000"
-                      value={kilometraje}
-                      onChange={(e) => setKilometraje(e.target.value)}
-                      className="w-full bg-[#111] border border-neutral-800 focus:border-red-600 focus:outline-none rounded-lg px-3 py-2 text-sm text-white font-mono"
-                    />
-                  </div>
-
-                  <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <label className="block text-xs font-heading font-bold uppercase tracking-wider text-neutral-300">
-                        2. Trabajos Realizados (Seleccioná uno o más)
-                      </label>
-                      <span className="text-[11px] font-mono font-bold text-red-400">
-                        {selectedServicios.length} seleccionado{selectedServicios.length !== 1 ? 's' : ''}
-                      </span>
-                    </div>
-
-                    {/* Multi-select items grid */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-56 overflow-y-auto p-2 bg-[#050505] rounded-lg border border-neutral-800">
-                      {WORKSHOP_ITEMS.map((item) => {
-                        const isSelected = selectedServicios.includes(item);
-                        return (
-                          <button
-                            type="button"
-                            key={item}
-                            onClick={() => toggleServicio(item)}
-                            className={`flex items-center gap-2 p-2 rounded text-left transition-all text-xs font-heading uppercase ${
-                              isSelected
-                                ? 'bg-red-600/25 border border-red-500 text-white font-bold'
-                                : 'bg-neutral-900/60 border border-neutral-800/80 text-neutral-400 hover:text-white hover:border-neutral-700'
-                            }`}
-                          >
-                            <div
-                              className={`w-4 h-4 rounded flex items-center justify-center shrink-0 border transition-colors ${
-                                isSelected ? 'bg-red-600 border-red-500 text-white' : 'border-neutral-700 bg-neutral-950'
-                              }`}
-                            >
-                              {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
-                            </div>
-                            <span className="truncate leading-tight text-[11px]">{item}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    {/* Selected summary */}
-                    {selectedServicios.length > 0 && (
-                      <div className="mt-2 p-2.5 rounded bg-red-950/30 border border-red-900/50 text-xs">
-                        <span className="text-[10px] uppercase font-bold text-red-400 block mb-0.5">
-                          Resumen seleccionado para la planilla:
-                        </span>
-                        <span className="font-semibold text-white break-words">
-                          {selectedServicios.join(' + ')}
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Optional notes */}
-                    <div className="mt-2.5">
-                      <label className="block text-[11px] font-heading font-medium text-neutral-400 uppercase mb-1">
-                        Detalle adicional (opcional, ej: lado derecho, marca)
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="Ej: Delantero derecho, marca Corven..."
-                        value={notasTrabajoAdicional}
-                        onChange={(e) => setNotasTrabajoAdicional(e.target.value)}
-                        className="w-full bg-[#111] border border-neutral-800 focus:border-red-600 focus:outline-none text-xs text-white rounded px-3 py-1.5"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label htmlFor={montoInputId} className="block text-xs font-heading font-bold uppercase tracking-wider text-neutral-300 mb-1">
-                      3. Monto Cobrado ($ ARS)
-                    </label>
-                    <input
-                      id={montoInputId}
-                      type="number"
-                      required
-                      placeholder="Ej: 45000"
-                      value={montoCobrado}
-                      onChange={(e) => setMontoCobrado(e.target.value)}
-                      className="w-full bg-[#111] border border-neutral-800 focus:border-red-600 focus:outline-none rounded-lg px-3 py-2 text-sm text-white font-mono"
-                    />
-                  </div>
-
-                  {/* Auto-accounting integration */}
-                  <div className="p-3 rounded-lg bg-neutral-950 border border-neutral-800 space-y-2.5">
-                    <label className="flex items-center gap-2 text-xs text-neutral-300 cursor-pointer font-medium">
-                      <input
-                        type="checkbox"
-                        checked={autoRegistrarContabilidad}
-                        onChange={(e) => setAutoRegistrarContabilidad(e.target.checked)}
-                        className="rounded text-red-600 focus:ring-0 bg-neutral-900 border-neutral-700"
-                      />
-                      <span>Sumar automáticamente a Contabilidad como Ingreso</span>
-                    </label>
-
-                    {autoRegistrarContabilidad && (
-                      <div>
-                        <label htmlFor={metodoPagoRepId} className="block text-[11px] font-heading font-bold text-neutral-400 uppercase mb-1">
-                          Método de Cobro
-                        </label>
-                        <select
-                          id={metodoPagoRepId}
-                          value={metodoPagoReparacion}
-                          onChange={(e) => setMetodoPagoReparacion(e.target.value)}
-                          className="w-full bg-[#111] border border-neutral-800 text-xs text-white rounded px-2.5 py-1.5"
-                        >
-                          <option value="Efectivo">Efectivo</option>
-                          <option value="Mercado Pago / Transferencia">Mercado Pago / Transferencia</option>
-                          <option value="Tarjeta de Débito">Tarjeta de Débito</option>
-                          <option value="Tarjeta de Crédito">Tarjeta de Crédito</option>
-                        </select>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Footer fijo con botones siempre a la vista */}
-                <div className="p-4 sm:p-5 bg-neutral-950 border-t border-neutral-800 flex items-center gap-3 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedTurno(null)}
-                    className="flex-1 py-3 rounded bg-neutral-900 hover:bg-neutral-800 text-neutral-300 font-heading font-bold text-xs uppercase tracking-wider transition-colors"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={savingWork}
-                    className="flex-2 py-3 rounded bg-red-600 hover:bg-red-700 active:scale-95 text-white font-heading font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-red-600/30 transition-all disabled:opacity-50"
-                  >
-                    {savingWork ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>Guardando en Sheets...</span>
-                      </>
-                    ) : (
-                      <>
-                        <span>✅ Archivar como Atendido</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </form>
             </div>
           </div>
         )}

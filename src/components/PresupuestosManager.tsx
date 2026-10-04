@@ -30,6 +30,7 @@ interface PresupuestosManagerProps {
   presupuestosList?: Presupuesto[];
   onPresupuestosUpdated?: (updated: Presupuesto[]) => void;
   onRegistrarIngresoCaja: (concepto: string, monto: number, referencia: string) => void;
+  onTurnoAtendido?: (patente: string) => void;
   onShowToast: (type: 'success' | 'error' | 'warning' | 'info', title: string, desc?: string) => void;
   initialTurnoParaPresupuestar?: TurnoAdmin | null;
   onClearInitialTurno?: () => void;
@@ -90,6 +91,7 @@ export const PresupuestosManager = ({
   presupuestosList,
   onPresupuestosUpdated,
   onRegistrarIngresoCaja,
+  onTurnoAtendido,
   onShowToast,
   initialTurnoParaPresupuestar,
   onClearInitialTurno,
@@ -429,14 +431,24 @@ export const PresupuestosManager = ({
       prev.map((item) => (item.id === id ? { ...item, estado: nuevoEstado } : item))
     );
 
-    // Si cambió a facturado y no estaba facturado antes, registrar de inmediato en Contabilidad
+    // Si cambió a facturado y no estaba facturado antes, registrar de inmediato en Contabilidad y en Detalles_Turnos
     if (nuevoEstado === 'facturado' && estadoAnterior !== 'facturado') {
-      const concepto = `Presupuesto ${p.numero} - ${p.patente} (${p.vehiculoModelo || p.items[0]?.descripcion || 'Trabajos varios'})`;
+      const concepto = `Facturación ${p.numero} - ${p.patente} (${p.vehiculoModelo || p.items[0]?.descripcion || 'Trabajos varios'})`;
       onRegistrarIngresoCaja(concepto, p.total, p.patente);
+
+      // Registrar automáticamente en la hoja Detalles_Turnos y pasar turno a Atendido
+      try {
+        gasApi.facturarPresupuestoYArchivar(p).catch((err) => console.warn(err));
+      } catch (err) {}
+
+      if (onTurnoAtendido) {
+        onTurnoAtendido(p.patente);
+      }
+
       onShowToast(
         'success',
-        '¡Presupuesto Facturado y Registrado en Caja!',
-        `Se ingresaron $${p.total.toLocaleString('es-AR')} a la Contabilidad del taller.`
+        '¡Presupuesto Facturado y Servicio Archivado!',
+        `Vehículo ${p.patente} (${p.vehiculoModelo || 'Taller'}) archivado en historial clínico y se ingresaron $${p.total.toLocaleString('es-AR')} a Caja.`
       );
     } else {
       onShowToast('info', 'Estado actualizado', `${p.numero} marcado como ${nuevoEstado.toUpperCase()}.`);
