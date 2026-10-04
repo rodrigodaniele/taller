@@ -1,0 +1,41 @@
+export const WORKSHOP_ITEMS = [
+  'ALINEACIÓN Y BALANCEO',
+  'AMORTIGUADOR',
+  'CAZOLETA',
+  'ESPIRAL',
+  'EXTREMO DE DIRECCIÓN',
+  'PRECAP / AXIAL',
+  'FUELLE',
+  'RÓTULA DE SUSPENSIÓN',
+  'BUJE DE PARRILLA',
+  'BIELETA',
+  'PASTILLAS DE FRENOS',
+  'DISCO DE FRENO',
+  'RULEMÁN DE MAZA',
+  'NEUMÁTICOS',
+] as const;
+
+export const GASTOS_PREDEFINIDOS = [
+  // Repuestos directos del catálogo
+  'EXTREMO DE DIRECCIÓN',
+  'AMORTIGUADOR',
+  'CAZOLETA',
+  'ESPIRAL',
+  'PRECAP / AXIAL',
+  'FUELLE',
+  'RÓTULA DE SUSPENSIÓN',
+  'BUJE DE PARRILLA',
+  'BIELETA',
+  'PASTILLAS DE FRENOS',
+  'DISCO DE FRENO',
+  'RULEMÁN DE MAZA',
+  'NEUMÁTICOS',
+  // Gastos operativos y fijos
+  'Boleta de Luz / Energía Eléctrica',
+  'Alquiler del Taller',
+  'Insumos de Taller (Grasas, Plomos, Válvulas)',
+  'Servicio de Internet / Telefonía',
+  'Mantenimiento Rampa / Alineadora / Balanceadora',
+  'Sueldos / Mano de Obra Ayudante',
+  'Otro Gasto (Personalizado)',
+] as const;

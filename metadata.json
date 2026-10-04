@@ -1,0 +1,6 @@
+{
+  "name": "La Casa de la Dirección",
+  "description": "Taller mecánico especializado en alineación 3D, balanceo digital y tren delantero en General Alvear, Mendoza.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
