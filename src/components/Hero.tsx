@@ -12,7 +12,7 @@ export const Hero = ({ onScheduleClick, isLoggedIn }: HeroProps) => {
       {/* Background with automotive imagery & measured scrim */}
       <div className="absolute inset-0 z-0">
         <img
-          src="/src/assets/images/hero_workshop_header_1791116593992.jpg"
+          src="/assets/images/hero_workshop_header_1791116593992.jpg"
           alt="Taller La Casa de la Dirección"
           referrerPolicy="no-referrer"
           className="w-full h-full object-cover object-center filter brightness-[0.45] contrast-[1.1]"

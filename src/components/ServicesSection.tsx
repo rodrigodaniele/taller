@@ -11,7 +11,7 @@ export const ServicesSection = ({ onScheduleClick }: ServicesSectionProps) => {
       subtitle: 'Dirección precisa y desgaste parejo de cubiertas',
       description:
         'Ajustamos de manera milimétrica los ángulos geométricos de las cuatro ruedas con sensores láser de alta resolución. Garantizamos que el auto ruede en línea recta sin derivas ni tironeos.',
-      image: '/src/assets/images/service_wheel_alignment_1791116604956.jpg',
+      image: '/assets/images/service_wheel_alignment_1791116604956.jpg',
       points: [
         'Medición de convergencia, divergencia, comba y caster',
         'Evita el desgaste prematuro e irregular de los neumáticos',
@@ -23,7 +23,7 @@ export const ServicesSection = ({ onScheduleClick }: ServicesSectionProps) => {
       subtitle: 'Conducción suave y libre de vibraciones',
       description:
         'Corregimos el desbalance de peso del conjunto llanta-neumático mediante diagnóstico computarizado de alta velocidad. Eliminamos los rebotes y sacudidas del volante en ruta.',
-      image: '/src/assets/images/service_digital_balancing_1791116616505.jpg',
+      image: '/assets/images/service_digital_balancing_1791116616505.jpg',
       points: [
         'Diagnóstico dinámico y estático de alta sensibilidad',
         'Contrapesas calibradas de máxima fijación',
@@ -35,7 +35,7 @@ export const ServicesSection = ({ onScheduleClick }: ServicesSectionProps) => {
       subtitle: 'Inspección técnica integral y recambio de componentes',
       description:
         'Revisión estructural minuciosa de cada pieza que conecta las ruedas con el chasis. Diagnosticamos holguras, fatiga de materiales y ruidos extraños antes de que se conviertan en fallas graves.',
-      image: '/src/assets/images/service_front_suspension_1791116625797.jpg',
+      image: '/assets/images/service_front_suspension_1791116625797.jpg',
       points: [
         'Amortiguadores, cazoletas y espirales',
         'Rótulas, extremos de dirección y axiales (precaps)',
