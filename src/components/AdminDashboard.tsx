@@ -460,7 +460,14 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
     };
 
     try {
-      // Guardar en Google Sheets (Hoja "Turnos" y crea usuario en "Usuarios" con contraseña 123456)
+      // 1. Registrar al usuario usando 'accion: registrar' (compatible con la versión actual de Google Apps Script)
+      try {
+        await gasApi.register(cleanNombre, cleanTelefono, cleanEmail, '123456');
+      } catch (errReg) {
+        console.warn('Registro de usuario vía register:', errReg);
+      }
+
+      // 2. Guardar en Google Sheets (Hoja "Turnos" y asegura datos en "Usuarios")
       await gasApi.createTurnoMostrador({
         patente: cleanPatente,
         fecha: mostradorFecha,
@@ -589,8 +596,8 @@ function autorizarPermisosDeEmail() {
 function doPost(e) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var sheetUsuarios = ss.getSheets()[0]; 
-    var sheetTurnos = ss.getSheetByName("Turnos");
+    var sheetUsuarios = ss.getSheetByName("Usuarios") || ss.getSheetByName("Clientes") || ss.getSheets()[0]; 
+    var sheetTurnos = ss.getSheetByName("Turnos") || ss.insertSheet("Turnos");
     var sheetContabilidad = ss.getSheetByName("Contabilidad") || ss.insertSheet("Contabilidad");
     var datos = JSON.parse(e.postData.contents);
     
@@ -981,7 +988,7 @@ function ejecutarLimpiezaYOrdenamientoCompleto() {
 function obtenerTurnosAdmin() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("Turnos");
-  var sheetUsuarios = ss.getSheets()[0];
+  var sheetUsuarios = ss.getSheetByName("Usuarios") || ss.getSheetByName("Clientes") || ss.getSheets()[0];
   if (!sheet) return { success: true, turnos: [] };
   var datos = sheet.getDataRange().getValues();
 
@@ -1110,7 +1117,7 @@ function borrarPresupuestoSheet(id) {
 function registrarTurnoMostrador(d) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheetTurnos = ss.getSheetByName("Turnos") || ss.insertSheet("Turnos");
-  var sheetUsuarios = ss.getSheets()[0];
+  var sheetUsuarios = ss.getSheetByName("Usuarios") || ss.getSheetByName("Clientes") || ss.getSheets()[0];
 
   if (sheetTurnos.getLastRow() === 0) {
     sheetTurnos.appendRow(["Email", "Fecha", "Horario", "Patente", "Estado"]);
@@ -1126,6 +1133,9 @@ function registrarTurnoMostrador(d) {
 
   // CREAR O ACTUALIZAR USUARIO AUTOMÁTICAMENTE CON CONTRASEÑA 123456
   if (sheetUsuarios) {
+    if (sheetUsuarios.getLastRow() === 0) {
+      sheetUsuarios.appendRow(["Nombre", "Teléfono", "Email", "Password", "FechaRegistro"]);
+    }
     var datosU = sheetUsuarios.getDataRange().getValues();
     var existe = false;
     for (var u = 1; u < datosU.length; u++) {
