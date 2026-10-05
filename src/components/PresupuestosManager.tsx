@@ -174,6 +174,13 @@ export const PresupuestosManager = ({
     }
   }, [presupuestos]);
 
+  // Sincronización en tiempo real desde el Administrador cuando se reciben presupuestos actualizados
+  useEffect(() => {
+    if (presupuestosList && presupuestosList.length > 0) {
+      setPresupuestos(presupuestosList);
+    }
+  }, [presupuestosList]);
+
   const [refreshingPresupuestos, setRefreshingPresupuestos] = useState(false);
 
   const handleRefreshPresupuestos = async () => {

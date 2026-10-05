@@ -108,27 +108,27 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
   const busquedaContableId = useId();
 
   // Load turnos
-  const fetchTurnos = async () => {
-    setLoadingTurnos(true);
+  const fetchTurnos = async (silent = false) => {
+    if (!silent) setLoadingTurnos(true);
     try {
       const res = await gasApi.getAdminTurnos();
       if (res.success && Array.isArray(res.turnos)) {
         setTurnos(res.turnos);
       } else {
         setTurnos([]);
-        if (res.error) onShowToast('error', 'Error en Google Sheets', res.error);
+        if (res.error && !silent) onShowToast('error', 'Error en Google Sheets', res.error);
       }
     } catch (err: any) {
       console.error(err);
-      onShowToast('error', 'Falla de conexión', 'No se pudieron consultar los turnos.');
+      if (!silent) onShowToast('error', 'Falla de conexión', 'No se pudieron consultar los turnos.');
     } finally {
-      setLoadingTurnos(false);
+      if (!silent) setLoadingTurnos(false);
     }
   };
 
   // Load contabilidad
-  const fetchContabilidad = async () => {
-    setLoadingContabilidad(true);
+  const fetchContabilidad = async (silent = false) => {
+    if (!silent) setLoadingContabilidad(true);
     try {
       const res = await gasApi.getAccountingMovements();
       if (res.success && Array.isArray(res.movimientos)) {
@@ -139,11 +139,11 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
     } catch (err: any) {
       console.error(err);
     } finally {
-      setLoadingContabilidad(false);
+      if (!silent) setLoadingContabilidad(false);
     }
   };
 
-  const fetchPresupuestos = async () => {
+  const fetchPresupuestos = async (silent = false) => {
     try {
       const res = await gasApi.getPresupuestos();
       if (res && res.presupuestos) {
@@ -158,6 +158,64 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
     fetchTurnos();
     fetchContabilidad();
     fetchPresupuestos();
+
+    // Sincronización en tiempo real para el Panel de Administrador
+    let bc: BroadcastChannel | null = null;
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        bc = new BroadcastChannel('lacasadeladireccion_realtime');
+        bc.onmessage = () => {
+          fetchTurnos(true);
+          fetchPresupuestos(true);
+          fetchContabilidad(true);
+        };
+      } catch {}
+    }
+
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'taller_presupuestos_v1') fetchPresupuestos(true);
+      if (e.key === 'lacasadeladireccion_contabilidad') fetchContabilidad(true);
+    };
+    window.addEventListener('storage', handleStorage);
+
+    const handleCustomSync = () => {
+      fetchTurnos(true);
+      fetchPresupuestos(true);
+      fetchContabilidad(true);
+    };
+    window.addEventListener('taller_presupuesto_sync', handleCustomSync);
+
+    const handleFocus = () => {
+      fetchTurnos(true);
+      fetchPresupuestos(true);
+      fetchContabilidad(true);
+    };
+    window.addEventListener('focus', handleFocus);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        fetchTurnos(true);
+        fetchPresupuestos(true);
+        fetchContabilidad(true);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    // Polling automático cada 7 segundos para mantener todo sincronizado en tiempo real
+    const interval = setInterval(() => {
+      fetchTurnos(true);
+      fetchPresupuestos(true);
+      fetchContabilidad(true);
+    }, 7000);
+
+    return () => {
+      if (bc) bc.close();
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('taller_presupuesto_sync', handleCustomSync);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      clearInterval(interval);
+    };
   }, []);
 
   // Filter turnos
