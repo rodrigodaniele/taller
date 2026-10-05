@@ -537,9 +537,6 @@ export const ClientDashboard = ({
   const turnosProgramados = turnos.filter(
     (t) => String(t.estado).toLowerCase().trim() === 'programado'
   );
-  const turnosAtendidos = turnos.filter(
-    (t) => String(t.estado).toLowerCase().trim() !== 'programado'
-  );
 
   const presupuestosPendientesCount = presupuestos.filter((p) => p.estado === 'pendiente').length;
 
@@ -859,32 +856,6 @@ export const ClientDashboard = ({
                 </div>
               )}
             </div>
-
-            {turnosAtendidos.length > 0 && (
-              <div className="pt-6 border-t border-neutral-900">
-                <h3 className="font-heading font-bold text-neutral-400 text-sm uppercase tracking-wider mb-3">
-                  📋 Citas Atendidas Anteriores
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {turnosAtendidos.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className="p-4 rounded-lg bg-neutral-950 border border-neutral-800 flex items-center justify-between text-xs"
-                    >
-                      <div>
-                        <span className="font-mono font-bold text-neutral-300 uppercase">{item.patente}</span>
-                        <div className="text-neutral-400 mt-0.5 font-mono">
-                          {formatearFechaArgentina(item.fecha)} · {String(item.horario).replace("'", '')} hs
-                        </div>
-                      </div>
-                      <span className="text-[10px] font-heading uppercase text-neutral-400 px-2 py-0.5 rounded bg-neutral-900">
-                        {item.estado}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         )}
 
