@@ -534,9 +534,27 @@ export const ClientDashboard = ({
     }
   };
 
-  const turnosProgramados = turnos.filter(
-    (t) => String(t.estado).toLowerCase().trim() === 'programado'
-  );
+  const turnosProgramados = turnos.filter((t) => {
+    if (String(t.estado).toLowerCase().trim() !== 'programado') return false;
+    const cleanPat = String(t.patente || '').toUpperCase().trim();
+    // Excluir si ya tiene un presupuesto facturado (servicio concluido y archivado)
+    const estaFacturado = presupuestos.some(
+      (p) => (p.patente || '').toUpperCase().trim() === cleanPat && p.estado === 'facturado'
+    );
+    if (estaFacturado) return false;
+
+    try {
+      const saved = localStorage.getItem('taller_turnos_atendidos_v1');
+      if (saved) {
+        const list: string[] = JSON.parse(saved);
+        if (list.map((x) => x.toUpperCase().trim()).includes(cleanPat)) {
+          return false;
+        }
+      }
+    } catch {}
+
+    return true;
+  });
 
   // Presupuestos activos para el cliente (se excluyen los facturados, ya que concluyeron y pasan a la Ficha de Servicios)
   const presupuestosActivos = presupuestos.filter((p) => p.estado !== 'facturado');

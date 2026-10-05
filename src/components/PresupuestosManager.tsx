@@ -405,14 +405,45 @@ export const PresupuestosManager = ({
       const concepto = `Facturación ${p.numero} - ${p.patente} (${p.vehiculoModelo || p.items[0]?.descripcion || 'Trabajos varios'})`;
       onRegistrarIngresoCaja(concepto, p.total, p.patente);
 
-      // Registrar automáticamente en la hoja Detalles_Turnos y pasar turno a Atendido
+      // 1. Guardar en almacenamiento local como turno atendido
       try {
-        gasApi.facturarPresupuestoYArchivar(p).catch((err) => console.warn(err));
-      } catch (err) {}
+        const cleanPat = (p.patente || '').trim().toUpperCase();
+        if (cleanPat) {
+          const saved = localStorage.getItem('taller_turnos_atendidos_v1');
+          const list: string[] = saved ? JSON.parse(saved) : [];
+          if (!list.includes(cleanPat)) {
+            list.push(cleanPat);
+            localStorage.setItem('taller_turnos_atendidos_v1', JSON.stringify(list));
+          }
+          if (typeof BroadcastChannel !== 'undefined') {
+            try {
+              const bc = new BroadcastChannel('lacasadeladireccion_realtime');
+              bc.postMessage({ type: 'TURNO_ATENDIDO', patente: cleanPat });
+              bc.close();
+            } catch {}
+          }
+        }
+      } catch (e) {}
 
+      // 2. Quitar el turno de turnos programados pendientes en el AdminDashboard inmediatamente
       if (onTurnoAtendido) {
         onTurnoAtendido(p.patente);
       }
+
+      // 3. Registrar automáticamente en la hoja Detalles_Turnos y pasar turno a Atendido en Google Sheets
+      try {
+        gasApi.saveAdminWork({
+          email: p.clienteEmail || (p.patente.toLowerCase() + '@cliente.taller'),
+          fecha: p.fecha || new Date().toISOString().split('T')[0],
+          horario: '',
+          patente: p.patente,
+          kilometraje: p.kilometraje || 'S/D',
+          trabajoRealizado: `Presupuesto ${p.numero}: ` + (p.items?.map((it) => it.descripcion).join(' + ') || p.observaciones || 'Servicio Facturado'),
+          montoFinal: String(p.total),
+        }).catch((err) => console.warn(err));
+
+        gasApi.facturarPresupuestoYArchivar(p).catch((err) => console.warn(err));
+      } catch (err) {}
 
       onShowToast(
         'success',

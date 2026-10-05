@@ -35,6 +35,53 @@ interface AdminDashboardProps {
   onShowToast: (type: 'success' | 'error' | 'warning' | 'info', title: string, desc?: string) => void;
 }
 
+const getTurnosAtendidosSet = (): Set<string> => {
+  try {
+    const saved = localStorage.getItem('taller_turnos_atendidos_v1');
+    if (saved) {
+      const list: string[] = JSON.parse(saved);
+      return new Set(list.map((p) => p.toUpperCase().trim()));
+    }
+  } catch {}
+  return new Set();
+};
+
+const marcarTurnoAtendidoLocal = (patente: string) => {
+  try {
+    const clean = patente.toUpperCase().trim();
+    if (!clean) return;
+    const current = getTurnosAtendidosSet();
+    current.add(clean);
+    localStorage.setItem('taller_turnos_atendidos_v1', JSON.stringify(Array.from(current)));
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        const bc = new BroadcastChannel('lacasadeladireccion_realtime');
+        bc.postMessage({ type: 'TURNO_ATENDIDO', patente: clean });
+        bc.close();
+      } catch {}
+    }
+  } catch {}
+};
+
+const filtrarTurnosPendientes = (listaTurnos: TurnoAdmin[], listaPresupuestos: Presupuesto[]) => {
+  const atendidosSet = getTurnosAtendidosSet();
+  const patentesFacturadas = new Set(
+    listaPresupuestos
+      .filter((p) => p.estado === 'facturado')
+      .map((p) => (p.patente || '').toUpperCase().trim())
+  );
+
+  return listaTurnos.filter((t) => {
+    const cleanPat = (t.patente || '').toUpperCase().trim();
+    if (!cleanPat) return false;
+    // Si ya fue marcado como atendido localmente
+    if (atendidosSet.has(cleanPat)) return false;
+    // Si el vehículo ya tiene un presupuesto facturado (proceso finalizado y pasado a contabilidad)
+    if (patentesFacturadas.has(cleanPat)) return false;
+    return true;
+  });
+};
+
 export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProps) => {
   const [activeAdminTab, setActiveAdminTab] = useState<'turnos' | 'presupuestos' | 'contabilidad' | 'script'>('turnos');
   const [turnoParaPresupuesto, setTurnoParaPresupuesto] = useState<TurnoAdmin | null>(null);
@@ -113,7 +160,14 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
     try {
       const res = await gasApi.getAdminTurnos();
       if (res.success && Array.isArray(res.turnos)) {
-        setTurnos(res.turnos);
+        let currentPresupuestos = presupuestos;
+        try {
+          const savedP = localStorage.getItem('taller_presupuestos_v1');
+          if (savedP) currentPresupuestos = JSON.parse(savedP);
+        } catch {}
+
+        const pendientes = filtrarTurnosPendientes(res.turnos, currentPresupuestos);
+        setTurnos(pendientes);
       } else {
         setTurnos([]);
         if (res.error && !silent) onShowToast('error', 'Error en Google Sheets', res.error);
@@ -148,6 +202,8 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
       const res = await gasApi.getPresupuestos();
       if (res && res.presupuestos) {
         setPresupuestos(res.presupuestos);
+        // Al actualizar presupuestos, re-filtrar turnos por si alguno pasó a facturado
+        setTurnos((prev) => filtrarTurnosPendientes(prev, res.presupuestos));
       }
     } catch (e) {
       console.warn('Error fetching presupuestos:', e);
@@ -173,8 +229,12 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
     }
 
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === 'taller_presupuestos_v1') fetchPresupuestos(true);
+      if (e.key === 'taller_presupuestos_v1') {
+        fetchPresupuestos(true);
+        fetchTurnos(true);
+      }
       if (e.key === 'lacasadeladireccion_contabilidad') fetchContabilidad(true);
+      if (e.key === 'taller_turnos_atendidos_v1') fetchTurnos(true);
     };
     window.addEventListener('storage', handleStorage);
 
@@ -220,6 +280,10 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
 
   // Filter turnos
   const filteredTurnos = turnos.filter((t) => {
+    const cleanPat = String(t.patente || '').trim().toUpperCase();
+    if (presupuestos.some((p) => p.patente.trim().toUpperCase() === cleanPat && p.estado === 'facturado')) {
+      return false;
+    }
     const term = searchTerm.toLowerCase().trim();
     if (!term) return true;
     const pat = String(t.patente || '').toLowerCase();
@@ -419,6 +483,8 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
       }
 
       if (res.success) {
+        marcarTurnoAtendidoLocal(selectedTurno.patente);
+        setTurnos((prev) => prev.filter((t) => (t.patente || '').trim().toUpperCase() !== selectedTurno.patente.trim().toUpperCase()));
         onShowToast(
           'success',
           '¡Trabajo registrado y archivado!',
@@ -429,7 +495,6 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
         setSelectedTurno(null);
         setSelectedServicios([]);
         setNotasTrabajoAdicional('');
-        fetchTurnos();
       } else {
         onShowToast('error', 'Error al guardar', res.error || 'No se pudo actualizar la planilla.');
       }
@@ -443,8 +508,8 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
   // Quitar turno atendido desde presupuestos al facturar
   const handleTurnoAtendido = (patente: string) => {
     const cleanPat = patente.trim().toUpperCase();
-    setTurnos((prev) => prev.filter((t) => t.patente.trim().toUpperCase() !== cleanPat));
-    fetchTurnos();
+    marcarTurnoAtendidoLocal(cleanPat);
+    setTurnos((prev) => prev.filter((t) => (t.patente || '').trim().toUpperCase() !== cleanPat));
   };
 
   // Query real-time slot availability for counter turnos
@@ -1308,8 +1373,9 @@ function registrarTrabajoDesdePresupuesto(p) {
   if (sheetTurnos) {
     var datosTurnos = sheetTurnos.getDataRange().getValues();
     for (var i = 1; i < datosTurnos.length; i++) {
-      var patFila = datosTurnos[i][3] ? datosTurnos[i][3].toString().trim().toUpperCase() : "";
-      if (patFila === patenteFmt && datosTurnos[i][4] && datosTurnos[i][4].toString().toLowerCase() === "programado") {
+      var patFila = datosTurnos[i][3] ? datosTurnos[i][3].toString().replace("'", "").trim().toUpperCase() : "";
+      var estFila = datosTurnos[i][4] ? datosTurnos[i][4].toString().trim().toLowerCase() : "";
+      if (patFila === patenteFmt && (estFila === "programado" || estFila === "")) {
         sheetTurnos.getRange(i + 1, 5).setValue("Atendido");
         break;
       }
