@@ -1565,20 +1565,6 @@ function doOptions(e) {
                 <button
                   type="button"
                   onClick={() => {
-                    fetchTurnos();
-                    onShowToast('info', 'Actualizando...', 'Consultando turnos en Google Sheets.');
-                  }}
-                  disabled={loadingTurnos}
-                  className="flex items-center justify-center gap-1.5 px-3.5 py-3 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-800 font-heading font-bold text-xs uppercase tracking-wider transition-all cursor-pointer disabled:opacity-50"
-                  title="Actualizar lista de turnos desde Google Sheets"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${loadingTurnos ? 'animate-spin text-red-500' : 'text-neutral-400'}`} />
-                  <span className="hidden sm:inline">Actualizar</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
                     const hoyStr = new Date().toISOString().split('T')[0];
                     setShowModalTurnoMostrador(true);
                     handleMostradorDateChange(hoyStr);
@@ -1869,33 +1855,17 @@ function doOptions(e) {
                 </button>
               </div>
 
-              {/* Search in contabilidad & Actualizar */}
-              <div className="flex items-center gap-2 flex-1 min-w-[260px]">
-                <div className="relative flex-1">
-                  <Search className="w-3.5 h-3.5 text-neutral-500 absolute left-3 top-3" />
-                  <input
-                    id={busquedaContableId}
-                    type="text"
-                    placeholder="Filtrar por concepto o patente..."
-                    value={filtroBusquedaContable}
-                    onChange={(e) => setFiltroBusquedaContable(e.target.value)}
-                    className="w-full bg-[#111] border border-neutral-800 focus:border-red-600 focus:outline-none rounded-lg pl-8 pr-3 py-2 text-xs text-white placeholder-neutral-500"
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    fetchContabilidad();
-                    onShowToast('info', 'Actualizando...', 'Consultando contabilidad en Google Sheets.');
-                  }}
-                  disabled={loadingContabilidad}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-800 font-heading font-bold text-xs uppercase tracking-wider transition-all cursor-pointer shrink-0 disabled:opacity-50"
-                  title="Actualizar caja y movimientos desde Google Sheets"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${loadingContabilidad ? 'animate-spin text-emerald-500' : 'text-neutral-400'}`} />
-                  <span className="hidden sm:inline">Actualizar</span>
-                </button>
+              {/* Search in contabilidad */}
+              <div className="relative flex-1 min-w-[220px]">
+                <Search className="w-3.5 h-3.5 text-neutral-500 absolute left-3 top-3" />
+                <input
+                  id={busquedaContableId}
+                  type="text"
+                  placeholder="Filtrar por concepto o patente..."
+                  value={filtroBusquedaContable}
+                  onChange={(e) => setFiltroBusquedaContable(e.target.value)}
+                  className="w-full bg-[#111] border border-neutral-800 focus:border-red-600 focus:outline-none rounded-lg pl-8 pr-3 py-2 text-xs text-white placeholder-neutral-500"
+                />
               </div>
             </div>
 

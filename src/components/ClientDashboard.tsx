@@ -874,16 +874,6 @@ export const ClientDashboard = ({
                   Revisá el detalle de piezas y mano de obra para tu auto, aprobá la cotización online o consultá con Rodrigo.
                 </p>
               </div>
-
-              <button
-                type="button"
-                onClick={() => loadClientPresupuestos()}
-                disabled={loadingPresupuestos}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-800 text-xs font-heading font-bold uppercase tracking-wider transition-all cursor-pointer disabled:opacity-50"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${loadingPresupuestos ? 'animate-spin text-red-500' : 'text-neutral-400'}`} />
-                <span>Actualizar</span>
-              </button>
             </div>
 
             {loadingPresupuestos ? (

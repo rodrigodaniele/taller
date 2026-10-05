@@ -939,17 +939,6 @@ export const PresupuestosManager = ({
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={handleRefreshPresupuestos}
-              disabled={refreshingPresupuestos}
-              className="flex items-center gap-1.5 px-3.5 py-2.5 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white border border-neutral-700 font-heading font-bold text-xs uppercase tracking-wider transition-all cursor-pointer disabled:opacity-50"
-              title="Actualizar presupuestos desde Google Sheets"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${refreshingPresupuestos ? 'animate-spin text-red-500' : 'text-neutral-400'}`} />
-              <span className="hidden sm:inline">Actualizar</span>
-            </button>
-
-            <button
-              type="button"
               onClick={() => iniciarNuevoPresupuesto()}
               className="flex items-center gap-2 px-5 py-2.5 rounded bg-red-600 hover:bg-red-700 active:scale-95 text-white font-heading font-black text-xs uppercase tracking-wider shadow-lg shadow-red-600/30 transition-all cursor-pointer"
             >
