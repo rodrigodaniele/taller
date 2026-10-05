@@ -1,4 +1,4 @@
-import { ApiResponse, DatosTrabajoAdmin, TurnoAdmin, Presupuesto } from '../types';
+import { ApiResponse, DatosTrabajoAdmin, TurnoAdmin, Presupuesto, ItemStock, ItemPresupuesto } from '../types';
 
 export const DEFAULT_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbziaELEqc9K1IKN2iXdEZ6bDN-GRUEJUUneEWfGM2VFg60uunAq_vb7gOIsxaDJEL08FA/exec";
 export const EMAIL_ADMIN_OFICIAL = "rodrigodanieleaset@gmail.com";
@@ -314,6 +314,195 @@ export const gasApi = {
       accion: 'facturarPresupuestoYArchivar',
       presupuesto,
     });
+  },
+
+  // --- MÓDULO DE STOCK & ROTACIÓN DE REPUESTOS ---
+  async getStockItems(): Promise<{ success: boolean; items: ItemStock[]; error?: string }> {
+    try {
+      const res = await callGasApi({ accion: 'obtenerStock' });
+      if (res && res.resultado === 'ok' && Array.isArray(res.items)) {
+        localStorage.setItem('taller_stock_v1', JSON.stringify(res.items));
+        return { success: true, items: res.items };
+      }
+    } catch (e) {
+      console.warn('Conexión con Sheets para stock no disponible o script previo, leyendo caché local:', e);
+    }
+    const saved = localStorage.getItem('taller_stock_v1');
+    const list: ItemStock[] = saved ? JSON.parse(saved) : [];
+    return { success: true, items: list };
+  },
+
+  async saveStockItem(item: ItemStock): Promise<{ success: boolean; error?: string }> {
+    try {
+      const saved = localStorage.getItem('taller_stock_v1');
+      const list: ItemStock[] = saved ? JSON.parse(saved) : [];
+      const idx = list.findIndex((x) => x.id === item.id);
+      if (idx >= 0) {
+        list[idx] = item;
+      } else {
+        list.push(item);
+      }
+      localStorage.setItem('taller_stock_v1', JSON.stringify(list));
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('taller_stock_sync', { detail: { item } }));
+        if (typeof BroadcastChannel !== 'undefined') {
+          try {
+            const bc = new BroadcastChannel('lacasadeladireccion_realtime');
+            bc.postMessage({ type: 'STOCK_UPDATED' });
+            bc.close();
+          } catch {}
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+
+    try {
+      return await callGasApi({ accion: 'guardarItemStock', item });
+    } catch (e) {
+      return { success: true };
+    }
+  },
+
+  async deleteStockItem(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const saved = localStorage.getItem('taller_stock_v1');
+      if (saved) {
+        const list: ItemStock[] = JSON.parse(saved).filter((x: ItemStock) => x.id !== id);
+        localStorage.setItem('taller_stock_v1', JSON.stringify(list));
+      }
+    } catch (e) {}
+
+    try {
+      return await callGasApi({ accion: 'eliminarItemStock', id });
+    } catch (e) {
+      return { success: true };
+    }
+  },
+
+  async ingresarCompraStock(datos: {
+    id: string;
+    cantidad: number;
+    costoTotal: number;
+    costoUnitario?: number;
+    registrarEnContabilidad?: boolean;
+    metodoPago?: string;
+  }): Promise<{ success: boolean; error?: string }> {
+    try {
+      const saved = localStorage.getItem('taller_stock_v1');
+      const list: ItemStock[] = saved ? JSON.parse(saved) : [];
+      const item = list.find((x) => x.id === datos.id);
+      if (item) {
+        item.stockActual = (Number(item.stockActual) || 0) + Number(datos.cantidad);
+        if (datos.costoUnitario && datos.costoUnitario > 0) {
+          item.costoUnitario = datos.costoUnitario;
+        } else if (datos.costoTotal && datos.cantidad > 0) {
+          item.costoUnitario = Math.round(datos.costoTotal / datos.cantidad);
+        }
+        item.ultimoMovimiento = new Date().toISOString().split('T')[0];
+        localStorage.setItem('taller_stock_v1', JSON.stringify(list));
+      }
+
+      // Si solicitó impactar en Contabilidad como gasto
+      if (datos.registrarEnContabilidad && datos.costoTotal > 0 && item) {
+        const mov = {
+          id: 'MOV-STOCK-' + Date.now(),
+          fecha: new Date().toISOString().split('T')[0],
+          tipo: 'gasto',
+          concepto: `Compra Stock: ${datos.cantidad}x ${item.nombre}`,
+          categoria: 'Repuestos / Repuesteros',
+          monto: Number(datos.costoTotal),
+          metodoPago: datos.metodoPago || 'Efectivo',
+          referencia: 'STOCK REPUESTOS',
+        };
+        await gasApi.addAccountingMovement(mov);
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('taller_stock_sync'));
+        if (typeof BroadcastChannel !== 'undefined') {
+          try {
+            const bc = new BroadcastChannel('lacasadeladireccion_realtime');
+            bc.postMessage({ type: 'STOCK_UPDATED' });
+            bc.close();
+          } catch {}
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+
+    try {
+      return await callGasApi({ accion: 'ingresarCompraStock', datos });
+    } catch (e) {
+      return { success: true };
+    }
+  },
+
+  async actualizarRotacionYDescontarStock(
+    items: ItemPresupuesto[],
+    vehiculoModelo?: string
+  ): Promise<void> {
+    try {
+      const repuestos = items.filter((it) => it.tipo === 'repuesto');
+      if (repuestos.length === 0) return;
+
+      const saved = localStorage.getItem('taller_stock_v1');
+      const list: ItemStock[] = saved ? JSON.parse(saved) : [];
+
+      repuestos.forEach((rep) => {
+        const cant = Number(rep.cantidad) || 1;
+        const nombreNorm = rep.descripcion.trim().toUpperCase();
+
+        let stockItem = list.find(
+          (x) =>
+            x.nombre.trim().toUpperCase() === nombreNorm ||
+            nombreNorm.includes(x.nombre.trim().toUpperCase()) ||
+            x.nombre.trim().toUpperCase().includes(nombreNorm)
+        );
+
+        if (stockItem) {
+          // Si tiene stock físico disponible, se descuenta
+          if (stockItem.stockActual > 0) {
+            stockItem.stockActual = Math.max(0, stockItem.stockActual - cant);
+          }
+          // Sumar siempre a la rotación histórica de piezas cambiadas
+          stockItem.totalInstalados = (Number(stockItem.totalInstalados) || 0) + cant;
+          stockItem.ultimoMovimiento = new Date().toISOString().split('T')[0];
+        } else {
+          // Registrar automáticamente la nueva pieza en el catálogo para llevar estadística de rotación
+          const nuevoItem: ItemStock = {
+            id: 'STOCK-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+            nombre: rep.descripcion.trim(),
+            categoria: 'Tren Delantero / Suspensión',
+            vehiculoCompatibilidad: vehiculoModelo || 'Multimarca',
+            stockActual: 0,
+            stockMinimo: 2,
+            costoUnitario: 0,
+            precioVenta: rep.precioUnitario || 0,
+            totalInstalados: cant,
+            ultimoMovimiento: new Date().toISOString().split('T')[0],
+          };
+          list.push(nuevoItem);
+        }
+      });
+
+      localStorage.setItem('taller_stock_v1', JSON.stringify(list));
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('taller_stock_sync'));
+        if (typeof BroadcastChannel !== 'undefined') {
+          try {
+            const bc = new BroadcastChannel('lacasadeladireccion_realtime');
+            bc.postMessage({ type: 'STOCK_UPDATED' });
+            bc.close();
+          } catch {}
+        }
+      }
+    } catch (e) {
+      console.warn('Error al actualizar rotación de stock:', e);
+    }
   },
 };
 

@@ -1,8 +1,9 @@
 import { useState, useEffect, useId, useTransition, useRef } from 'react';
-import { TurnoAdmin, DatosTrabajoAdmin, MovimientoContable, Presupuesto } from '../types';
+import { TurnoAdmin, DatosTrabajoAdmin, MovimientoContable, Presupuesto, ItemStock, ItemPresupuesto } from '../types';
 import { gasApi } from '../services/gasApi';
 import { WORKSHOP_ITEMS, GASTOS_PREDEFINIDOS } from '../constants/workshopItems';
 import { PresupuestosManager } from './PresupuestosManager';
+import { StockManager } from './StockManager';
 import { formatearFechaArgentina, formatearHorario } from '../utils/dateFormatter';
 import {
   ShieldAlert,
@@ -27,7 +28,8 @@ import {
   Receipt,
   Copy,
   Check,
-  FileText
+  FileText,
+  Package
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -83,7 +85,7 @@ const filtrarTurnosPendientes = (listaTurnos: TurnoAdmin[], listaPresupuestos: P
 };
 
 export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProps) => {
-  const [activeAdminTab, setActiveAdminTab] = useState<'turnos' | 'presupuestos' | 'contabilidad' | 'script'>('turnos');
+  const [activeAdminTab, setActiveAdminTab] = useState<'turnos' | 'presupuestos' | 'stock' | 'contabilidad' | 'script'>('turnos');
   const [turnoParaPresupuesto, setTurnoParaPresupuesto] = useState<TurnoAdmin | null>(null);
   const [, startTransition] = useTransition();
 
@@ -101,6 +103,10 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
   const [autoRegistrarContabilidad, setAutoRegistrarContabilidad] = useState(true);
   const [metodoPagoReparacion, setMetodoPagoReparacion] = useState('Efectivo');
   const [savingWork, setSavingWork] = useState(false);
+
+  // --- Stock & Rotación de Repuestos state ---
+  const [stockList, setStockList] = useState<ItemStock[]>([]);
+  const [loadingStock, setLoadingStock] = useState(false);
 
   // --- Contabilidad state ---
   const [movimientos, setMovimientos] = useState<MovimientoContable[]>([]);
@@ -210,10 +216,25 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
     }
   };
 
+  const fetchStock = async (silent = false) => {
+    if (!silent) setLoadingStock(true);
+    try {
+      const res = await gasApi.getStockItems();
+      if (res.success && Array.isArray(res.items)) {
+        setStockList(res.items);
+      }
+    } catch (e) {
+      console.warn('Error fetching stock:', e);
+    } finally {
+      if (!silent) setLoadingStock(false);
+    }
+  };
+
   useEffect(() => {
     fetchTurnos();
     fetchContabilidad();
     fetchPresupuestos();
+    fetchStock();
 
     // Sincronización en tiempo real para el Panel de Administrador
     let bc: BroadcastChannel | null = null;
@@ -224,6 +245,7 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
           fetchTurnos(true);
           fetchPresupuestos(true);
           fetchContabilidad(true);
+          fetchStock(true);
         };
       } catch {}
     }
@@ -235,6 +257,7 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
       }
       if (e.key === 'lacasadeladireccion_contabilidad') fetchContabilidad(true);
       if (e.key === 'taller_turnos_atendidos_v1') fetchTurnos(true);
+      if (e.key === 'taller_stock_v1') fetchStock(true);
     };
     window.addEventListener('storage', handleStorage);
 
@@ -242,13 +265,16 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
       fetchTurnos(true);
       fetchPresupuestos(true);
       fetchContabilidad(true);
+      fetchStock(true);
     };
     window.addEventListener('taller_presupuesto_sync', handleCustomSync);
+    window.addEventListener('taller_stock_sync', handleCustomSync);
 
     const handleFocus = () => {
       fetchTurnos(true);
       fetchPresupuestos(true);
       fetchContabilidad(true);
+      fetchStock(true);
     };
     window.addEventListener('focus', handleFocus);
 
@@ -257,6 +283,7 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
         fetchTurnos(true);
         fetchPresupuestos(true);
         fetchContabilidad(true);
+        fetchStock(true);
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);
@@ -266,12 +293,14 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
       fetchTurnos(true);
       fetchPresupuestos(true);
       fetchContabilidad(true);
+      fetchStock(true);
     }, 7000);
 
     return () => {
       if (bc) bc.close();
       window.removeEventListener('storage', handleStorage);
       window.removeEventListener('taller_presupuesto_sync', handleCustomSync);
+      window.removeEventListener('taller_stock_sync', handleCustomSync);
       window.removeEventListener('focus', handleFocus);
       document.removeEventListener('visibilitychange', handleVisibility);
       clearInterval(interval);
@@ -485,6 +514,21 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
       if (res.success) {
         marcarTurnoAtendidoLocal(selectedTurno.patente);
         setTurnos((prev) => prev.filter((t) => (t.patente || '').trim().toUpperCase() !== selectedTurno.patente.trim().toUpperCase()));
+
+        // Impactar en rotación de stock de repuestos utilizados en el taller
+        try {
+          const repuestoItems: ItemPresupuesto[] = selectedServicios.map((s, idx) => ({
+            id: `ITEM-SRV-${Date.now()}-${idx}`,
+            tipo: 'repuesto',
+            descripcion: s,
+            cantidad: 1,
+            precioUnitario: 0,
+            subtotal: 0,
+          }));
+          gasApi.actualizarRotacionYDescontarStock(repuestoItems, selectedTurno.patente);
+          fetchStock(true);
+        } catch {}
+
         onShowToast(
           'success',
           '¡Trabajo registrado y archivado!',
@@ -510,6 +554,22 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
     const cleanPat = patente.trim().toUpperCase();
     marcarTurnoAtendidoLocal(cleanPat);
     setTurnos((prev) => prev.filter((t) => (t.patente || '').trim().toUpperCase() !== cleanPat));
+  };
+
+  // Registrar gasto en Contabilidad cuando se compre stock de repuestos
+  const handleRegistrarGastoDesdeStock = async (concepto: string, monto: number, metodoPago: string) => {
+    const nuevoMovimiento: MovimientoContable = {
+      id: 'MOV-STOCK-' + Date.now(),
+      fecha: new Date().toISOString().split('T')[0],
+      tipo: 'gasto',
+      concepto,
+      categoria: 'Repuestos / Repuesteros',
+      monto,
+      metodoPago: metodoPago || 'Efectivo',
+      referencia: 'STOCK TALLER',
+    };
+    await gasApi.addAccountingMovement(nuevoMovimiento);
+    fetchContabilidad(true);
   };
 
   // Query real-time slot availability for counter turnos
@@ -1046,6 +1106,30 @@ function doPost(e) {
       var resFact = registrarTrabajoDesdePresupuesto(datos.presupuesto);
       return ContentService.createTextOutput(JSON.stringify(resFact)).setMimeType(ContentService.MimeType.JSON);
     }
+
+    // --- ACCIÓN 17: OBTENER INVENTARIO DE STOCK & REPUESTOS ---
+    if (datos.accion === "obtenerStock") {
+      var resStock = obtenerStockSheet();
+      return ContentService.createTextOutput(JSON.stringify(resStock)).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // --- ACCIÓN 18: GUARDAR O ACTUALIZAR ITEM DE STOCK ---
+    if (datos.accion === "guardarItemStock") {
+      var resSaveStock = guardarItemStockSheet(datos.item);
+      return ContentService.createTextOutput(JSON.stringify(resSaveStock)).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // --- ACCIÓN 19: ELIMINAR ITEM DE STOCK ---
+    if (datos.accion === "eliminarItemStock") {
+      var resDelStock = eliminarItemStockSheet(datos.id);
+      return ContentService.createTextOutput(JSON.stringify(resDelStock)).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // --- ACCIÓN 20: REGISTRAR COMPRA DE STOCK (CON IMPACTO EN CONTABILIDAD) ---
+    if (datos.accion === "ingresarCompraStock") {
+      var resCompraStock = ingresarCompraStockSheet(datos.datos);
+      return ContentService.createTextOutput(JSON.stringify(resCompraStock)).setMimeType(ContentService.MimeType.JSON);
+    }
                            
   } catch(error) {
     return ContentService.createTextOutput(JSON.stringify({"resultado": "error", "mensaje": error.toString()})).setMimeType(ContentService.MimeType.JSON);
@@ -1420,6 +1504,11 @@ function registrarTrabajoDesdePresupuesto(p) {
     }
   }
 
+  // Impactar en la hoja 'Stock': sumar a rotación de repuestos y descontar si hay stock físico
+  if (Array.isArray(p.items) && p.items.length > 0) {
+    actualizarRotacionStockSheet(p.items, modeloFmt || patenteFmt);
+  }
+
   ejecutarLimpiezaYOrdenamientoCompleto();
   return { success: true };
 }
@@ -1454,7 +1543,195 @@ function registrarTrabajoAdmin(datosTrabajo) {
       }
     }
   }
+
+  // Actualizar rotación histórica en la hoja 'Stock'
+  if (datosTrabajo && datosTrabajo.trabajoRealizado) {
+    actualizarRotacionDesdeTextoAdminSheet(datosTrabajo.trabajoRealizado, datosTrabajo.patente);
+  }
+
   return { success: true };
+}
+
+// --- FUNCIONES MÓDULO DE STOCK & REPUESTOS ---
+function obtenerStockSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Stock");
+  if (!sheet) {
+    sheet = ss.insertSheet("Stock");
+    sheet.appendRow(["ID", "Nombre", "Categoria", "VehiculoCompatibilidad", "StockActual", "StockMinimo", "CostoUnitario", "PrecioVenta", "TotalInstalados", "UltimoMovimiento"]);
+    return { resultado: "ok", items: [] };
+  }
+  var data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return { resultado: "ok", items: [] };
+  var items = [];
+  for (var i = 1; i < data.length; i++) {
+    var r = data[i];
+    if (r[0] || r[1]) {
+      items.push({
+        id: String(r[0] || "STOCK-" + i),
+        nombre: String(r[1] || ""),
+        categoria: String(r[2] || "Tren Delantero / Suspensión"),
+        vehiculoCompatibilidad: String(r[3] || "Multimarca"),
+        stockActual: Number(r[4]) || 0,
+        stockMinimo: Number(r[5]) || 2,
+        costoUnitario: Number(r[6]) || 0,
+        precioVenta: Number(r[7]) || 0,
+        totalInstalados: Number(r[8]) || 0,
+        ultimoMovimiento: String(r[9] || "")
+      });
+    }
+  }
+  return { resultado: "ok", items: items };
+}
+
+function guardarItemStockSheet(item) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Stock") || ss.insertSheet("Stock");
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(["ID", "Nombre", "Categoria", "VehiculoCompatibilidad", "StockActual", "StockMinimo", "CostoUnitario", "PrecioVenta", "TotalInstalados", "UltimoMovimiento"]);
+  }
+  var data = sheet.getDataRange().getValues();
+  var idTarget = String(item.id || "");
+  var nomTarget = String(item.nombre || "").trim().toUpperCase();
+  var filaEncontrada = -1;
+  for (var i = 1; i < data.length; i++) {
+    if ((idTarget && String(data[i][0]) === idTarget) || (String(data[i][1]).trim().toUpperCase() === nomTarget)) {
+      filaEncontrada = i + 1;
+      break;
+    }
+  }
+  var fila = [
+    item.id,
+    item.nombre,
+    item.categoria || "Tren Delantero / Suspensión",
+    item.vehiculoCompatibilidad || "Multimarca",
+    Number(item.stockActual) || 0,
+    Number(item.stockMinimo) || 2,
+    Number(item.costoUnitario) || 0,
+    Number(item.precioVenta) || 0,
+    Number(item.totalInstalados) || 0,
+    item.ultimoMovimiento || new Date().toISOString().split("T")[0]
+  ];
+  if (filaEncontrada > 0) {
+    sheet.getRange(filaEncontrada, 1, 1, fila.length).setValues([fila]);
+  } else {
+    sheet.appendRow(fila);
+  }
+  return { resultado: "ok", success: true };
+}
+
+function eliminarItemStockSheet(id) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Stock");
+  if (!sheet) return { resultado: "ok", success: true };
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === String(id)) {
+      sheet.deleteRow(i + 1);
+      break;
+    }
+  }
+  return { resultado: "ok", success: true };
+}
+
+function ingresarCompraStockSheet(datos) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Stock") || ss.insertSheet("Stock");
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(["ID", "Nombre", "Categoria", "VehiculoCompatibilidad", "StockActual", "StockMinimo", "CostoUnitario", "PrecioVenta", "TotalInstalados", "UltimoMovimiento"]);
+  }
+  var data = sheet.getDataRange().getValues();
+  var nomItem = "";
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === String(datos.id)) {
+      var stockPrev = Number(data[i][4]) || 0;
+      var nuevoStock = stockPrev + Number(datos.cantidad);
+      nomItem = String(data[i][1] || "");
+      sheet.getRange(i + 1, 5).setValue(nuevoStock);
+      if (datos.costoUnitario && Number(datos.costoUnitario) > 0) {
+        sheet.getRange(i + 1, 7).setValue(Number(datos.costoUnitario));
+      } else if (datos.costoTotal && Number(datos.cantidad) > 0) {
+        sheet.getRange(i + 1, 7).setValue(Math.round(Number(datos.costoTotal) / Number(datos.cantidad)));
+      }
+      sheet.getRange(i + 1, 10).setValue(new Date().toISOString().split("T")[0]);
+      break;
+    }
+  }
+  // Si solicitó impactar en Contabilidad como gasto
+  if (datos.registrarEnContabilidad && Number(datos.costoTotal) > 0) {
+    registrarMovimientoContabilidad({
+      id: "MOV-STOCK-" + new Date().getTime(),
+      fecha: new Date().toISOString().split("T")[0],
+      tipo: "gasto",
+      concepto: "Compra Stock: " + datos.cantidad + "x " + (nomItem || "Repuestos"),
+      categoria: "Repuestos / Repuesteros",
+      monto: Number(datos.costoTotal),
+      metodoPago: datos.metodoPago || "Efectivo",
+      referencia: "STOCK REPUESTOS"
+    });
+  }
+  return { resultado: "ok", success: true };
+}
+
+function actualizarRotacionStockSheet(items, vehiculoModelo) {
+  if (!items || !items.length) return;
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Stock") || ss.insertSheet("Stock");
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(["ID", "Nombre", "Categoria", "VehiculoCompatibilidad", "StockActual", "StockMinimo", "CostoUnitario", "PrecioVenta", "TotalInstalados", "UltimoMovimiento"]);
+  }
+  var data = sheet.getDataRange().getValues();
+  for (var k = 0; k < items.length; k++) {
+    var item = items[k];
+    if (item.tipo !== "repuesto") continue;
+    var cant = Number(item.cantidad) || 1;
+    var nomNorm = String(item.descripcion || "").trim().toUpperCase();
+    var encontrado = false;
+    for (var r = 1; r < data.length; r++) {
+      var nomFila = String(data[r][1] || "").trim().toUpperCase();
+      if (nomFila === nomNorm || nomNorm.indexOf(nomFila) !== -1 || nomFila.indexOf(nomNorm) !== -1) {
+        var stockActual = Number(data[r][4]) || 0;
+        if (stockActual > 0) {
+          sheet.getRange(r + 1, 5).setValue(Math.max(0, stockActual - cant));
+        }
+        var rotacionPrev = Number(data[r][8]) || 0;
+        sheet.getRange(r + 1, 9).setValue(rotacionPrev + cant);
+        sheet.getRange(r + 1, 10).setValue(new Date().toISOString().split("T")[0]);
+        encontrado = true;
+        break;
+      }
+    }
+    if (!encontrado) {
+      var nuevoID = "STOCK-" + new Date().getTime() + "-" + Math.floor(Math.random() * 1000);
+      sheet.appendRow([
+        nuevoID,
+        item.descripcion,
+        "Tren Delantero / Suspensión",
+        vehiculoModelo || "Multimarca",
+        0,
+        2,
+        0,
+        Number(item.precioUnitario) || 0,
+        cant,
+        new Date().toISOString().split("T")[0]
+      ]);
+    }
+  }
+}
+
+function actualizarRotacionDesdeTextoAdminSheet(textoTrabajo, patente) {
+  if (!textoTrabajo) return;
+  var partes = String(textoTrabajo).split(" + ");
+  var items = [];
+  for (var p = 0; p < partes.length; p++) {
+    var nom = partes[p].replace(/\s*\[.*\]/, "").trim();
+    if (nom) {
+      items.push({ tipo: "repuesto", descripcion: nom, cantidad: 1 });
+    }
+  }
+  if (items.length > 0) {
+    actualizarRotacionStockSheet(items, patente);
+  }
 }
 
 function obtenerHistorialCliente(emailCliente) {
@@ -1547,12 +1824,13 @@ function doOptions(e) {
                 fetchTurnos();
                 fetchContabilidad();
                 fetchPresupuestos();
-                onShowToast('info', 'Sincronizado', 'Planillas de turnos, presupuestos y caja actualizadas.');
+                fetchStock();
+                onShowToast('info', 'Sincronizado', 'Planillas de turnos, presupuestos, stock y caja actualizadas.');
               }}
-              disabled={loadingTurnos || loadingContabilidad}
+              disabled={loadingTurnos || loadingContabilidad || loadingStock}
               className="flex items-center gap-2 px-3.5 py-2 bg-neutral-900 hover:bg-neutral-800 text-neutral-200 border border-neutral-700 font-heading font-bold text-xs uppercase tracking-wider rounded transition-colors"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${loadingTurnos || loadingContabilidad ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`w-3.5 h-3.5 ${loadingTurnos || loadingContabilidad || loadingStock ? 'animate-spin' : ''}`} />
               <span>Sincronizar Sheets</span>
             </button>
           </div>
@@ -1629,6 +1907,18 @@ function doOptions(e) {
           >
             <FileText className="w-4 h-4" />
             <span>Presupuestos & Cotizaciones</span>
+          </button>
+
+          <button
+            onClick={() => setActiveAdminTab('stock')}
+            className={`flex items-center gap-2 px-5 py-3 font-heading font-black text-sm uppercase tracking-wider border-b-2 transition-all cursor-pointer ${
+              activeAdminTab === 'stock'
+                ? 'border-red-600 text-red-500'
+                : 'border-transparent text-neutral-400 hover:text-white'
+            }`}
+          >
+            <Package className="w-4 h-4" />
+            <span>Stock & Repuestos ({stockList.reduce((acc, it) => acc + (Number(it.stockActual) || 0), 0)})</span>
           </button>
 
           <button
@@ -1798,6 +2088,16 @@ function doOptions(e) {
             onShowToast={onShowToast}
             initialTurnoParaPresupuestar={turnoParaPresupuesto}
             onClearInitialTurno={() => setTurnoParaPresupuesto(null)}
+          />
+        )}
+
+        {/* TAB: STOCK & ROTACIÓN DE REPUESTOS */}
+        {activeAdminTab === 'stock' && (
+          <StockManager
+            stockList={stockList}
+            onStockUpdated={(items) => setStockList(items)}
+            onRegistrarGastoContabilidad={handleRegistrarGastoDesdeStock}
+            onShowToast={onShowToast}
           />
         )}
 
@@ -2084,10 +2384,10 @@ function doOptions(e) {
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
                   <h3 className="font-heading font-black text-lg text-white uppercase tracking-wide">
-                    Código de tu Google Apps Script con la Hoja &ldquo;Contabilidad&rdquo;
+                    Código de tu Google Apps Script (Hojas Turnos, Contabilidad, Presupuestos y Stock)
                   </h3>
                   <p className="text-xs text-neutral-400 mt-1">
-                    Copiá este código y reemplazalo en tu archivo <strong>Code.gs</strong> de tu planilla de Google Sheets. El sistema creará automáticamente la pestaña <strong>Contabilidad</strong>.
+                    Copiá este código y reemplazalo en tu archivo <strong>Code.gs</strong> de tu planilla de Google Sheets. El sistema creará y sincronizará automáticamente las pestañas <strong>Contabilidad</strong>, <strong>Presupuestos</strong> y <strong>Stock</strong>.
                   </p>
                 </div>
 

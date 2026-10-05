@@ -435,6 +435,13 @@ export const PresupuestosManager = ({
         gasApi.facturarPresupuestoYArchivar(p).catch((err) => console.warn(err));
       } catch (err) {}
 
+      // 4. Actualizar radar de rotación histórica de repuestos y descontar del inventario si hay stock físico
+      try {
+        if (Array.isArray(p.items) && p.items.length > 0) {
+          gasApi.actualizarRotacionYDescontarStock(p.items, p.vehiculoModelo || p.patente);
+        }
+      } catch (err) {}
+
       onShowToast(
         'success',
         '¡Presupuesto Facturado y Servicio Archivado!',

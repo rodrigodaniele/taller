@@ -60,6 +60,19 @@ export interface ItemPresupuesto {
   subtotal: number;
 }
 
+export interface ItemStock {
+  id: string;
+  nombre: string;
+  categoria?: string;
+  vehiculoCompatibilidad?: string;
+  stockActual: number;
+  stockMinimo: number;
+  costoUnitario: number;
+  precioVenta: number;
+  totalInstalados: number; // Rotación histórica
+  ultimoMovimiento?: string;
+}
+
 export interface Presupuesto {
   id: string;
   numero: string;
