@@ -1,4 +1,4 @@
-import { useState, useEffect, useId } from 'react';
+import { useState, useEffect, useId, useMemo } from 'react';
 import { User, Turno, HistorialServicio, Presupuesto } from '../types';
 import { gasApi } from '../services/gasApi';
 import { formatearFechaArgentina, calcularFechaVencimiento, formatearHorario } from '../utils/dateFormatter';
@@ -538,7 +538,43 @@ export const ClientDashboard = ({
     (t) => String(t.estado).toLowerCase().trim() === 'programado'
   );
 
-  const presupuestosPendientesCount = presupuestos.filter((p) => p.estado === 'pendiente').length;
+  // Presupuestos activos para el cliente (se excluyen los facturados, ya que concluyeron y pasan a la Ficha de Servicios)
+  const presupuestosActivos = presupuestos.filter((p) => p.estado !== 'facturado');
+  const presupuestosPendientesCount = presupuestosActivos.filter((p) => p.estado === 'pendiente').length;
+
+  // Presupuestos facturados convertidos automáticamente en registros del historial clínico automotor
+  const facturadosComoHistorial = useMemo(() => {
+    return presupuestos
+      .filter((p) => p.estado === 'facturado')
+      .map((p) => ({
+        id: p.id,
+        patente: p.patente,
+        modelo: p.vehiculoModelo || '',
+        fecha: p.fecha,
+        trabajo: p.items.map((it) => `${it.cantidad > 1 ? `${it.cantidad}x ` : ''}${it.descripcion}`).join(' · '),
+        kilometraje: p.kilometraje || 'S/D',
+        monto: String(p.total),
+        esPresupuestoFacturado: true,
+        presupuestoOriginal: p,
+      }));
+  }, [presupuestos]);
+
+  // Historial combinado (Detalles_Turnos de Sheets + presupuestos facturados) sin duplicados
+  const listaHistorialCompleta = useMemo(() => {
+    const list: any[] = [...historialList];
+    facturadosComoHistorial.forEach((fact) => {
+      const yaExiste = list.some(
+        (h) =>
+          h.patente &&
+          h.patente.toUpperCase().trim() === fact.patente.toUpperCase().trim() &&
+          String(h.fecha).substring(0, 10) === String(fact.fecha).substring(0, 10)
+      );
+      if (!yaExiste) {
+        list.unshift(fact);
+      }
+    });
+    return list;
+  }, [historialList, facturadosComoHistorial]);
 
   return (
     <div className="min-h-screen py-10 px-4 sm:px-6 lg:px-8 bg-[#050505]">
@@ -740,7 +776,7 @@ export const ClientDashboard = ({
             }`}
           >
             <FileText className="w-4 h-4" />
-            <span>Mis Presupuestos ({presupuestos.length})</span>
+            <span>Mis Presupuestos ({presupuestosActivos.length})</span>
             {presupuestosPendientesCount > 0 && (
               <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/40">
                 {presupuestosPendientesCount} pendiente{presupuestosPendientesCount > 1 ? 's' : ''}
@@ -881,19 +917,31 @@ export const ClientDashboard = ({
                 <Loader2 className="w-8 h-8 animate-spin mx-auto mb-3 text-red-500" />
                 <span className="font-heading uppercase tracking-wider">Consultando presupuestos en el taller...</span>
               </div>
-            ) : presupuestos.length === 0 ? (
-              <div className="p-10 rounded-xl bg-neutral-900/40 border border-neutral-800 text-center space-y-2">
+            ) : presupuestosActivos.length === 0 ? (
+              <div className="p-10 rounded-xl bg-neutral-900/40 border border-neutral-800 text-center space-y-3">
                 <FileText className="w-10 h-10 text-neutral-600 mx-auto" />
                 <h4 className="font-heading font-bold text-white uppercase text-base">
-                  Aún no tenés cotizaciones cargadas
+                  No tenés cotizaciones activas pendientes
                 </h4>
                 <p className="text-xs text-neutral-400 max-w-md mx-auto">
-                  Cuando Rodrigo elabore un presupuesto para tu vehículo, vas a poder ver el desglose completo de repuestos y mano de obra acá mismo para aprobarlo.
+                  {presupuestos.some((p) => p.estado === 'facturado')
+                    ? 'Tus servicios concluidos y facturados fueron archivados en tu Ficha de Servicios Realizados.'
+                    : 'Cuando Rodrigo elabore un presupuesto para tu vehículo, vas a poder ver el desglose completo de repuestos y mano de obra acá mismo para aprobarlo.'}
                 </p>
+                {presupuestos.some((p) => p.estado === 'facturado') && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('historial')}
+                    className="mt-2 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white border border-red-600/40 text-xs font-heading font-bold uppercase tracking-wider transition-all cursor-pointer"
+                  >
+                    <History className="w-4 h-4" />
+                    <span>Ver Ficha de Servicios Realizados</span>
+                  </button>
+                )}
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {presupuestos.map((p) => {
+                {presupuestosActivos.map((p) => {
                   const estadoBadge = {
                     pendiente: {
                       bg: 'bg-amber-950/60 border-amber-800/80 text-amber-400',
@@ -1069,14 +1117,6 @@ export const ClientDashboard = ({
                   Ficha técnica de trabajos, kilómetros certificados y valores registrados en el taller.
                 </p>
               </div>
-
-              <button
-                onClick={loadClientHistory}
-                disabled={loadingHistorial}
-                className="text-xs text-red-400 hover:text-red-300 underline underline-offset-2 flex items-center gap-1 font-heading font-bold uppercase cursor-pointer"
-              >
-                {loadingHistorial ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Actualizar'}
-              </button>
             </div>
 
             {loadingHistorial ? (
@@ -1084,7 +1124,7 @@ export const ClientDashboard = ({
                 <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-red-500" />
                 <span>Consultando tu historial clínico en el servidor...</span>
               </div>
-            ) : historialList.length === 0 ? (
+            ) : listaHistorialCompleta.length === 0 ? (
               <div className="p-8 rounded-xl bg-neutral-900/40 border border-neutral-800 text-center">
                 <Wrench className="w-8 h-8 text-neutral-500 mx-auto mb-2" />
                 <p className="text-sm text-neutral-300 font-medium">Aún no registrás servicios archivados con este correo.</p>
@@ -1094,7 +1134,7 @@ export const ClientDashboard = ({
               </div>
             ) : (
               <div className="space-y-3">
-                {historialList.map((item, idx) => (
+                {listaHistorialCompleta.map((item, idx) => (
                     <div
                       key={idx}
                       className="p-5 rounded-xl bg-neutral-900 border border-neutral-800 border-l-4 border-l-red-600 shadow-md space-y-3"
@@ -1128,15 +1168,31 @@ export const ClientDashboard = ({
                         <div className="flex items-center gap-1.5 font-mono">
                           <span>📈 Kilometraje:</span>
                           <strong className="text-white">
-                            {Number(item.kilometraje).toLocaleString('es-AR')} km
+                            {isNaN(Number(item.kilometraje))
+                              ? item.kilometraje
+                              : `${Number(item.kilometraje).toLocaleString('es-AR')} km`}
                           </strong>
                         </div>
 
-                        <div className="flex items-center gap-1.5 font-mono">
-                          <span>💰 Monto Total:</span>
-                          <strong className="text-emerald-400 text-sm">
-                            ${Number(item.monto).toLocaleString('es-AR')}
-                          </strong>
+                        <div className="flex items-center gap-3">
+                          {item.esPresupuestoFacturado && item.presupuestoOriginal && (
+                            <button
+                              type="button"
+                              onClick={() => imprimirPresupuestoCliente(item.presupuestoOriginal)}
+                              className="px-3 py-1.5 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white border border-neutral-700 font-heading font-bold text-[11px] uppercase tracking-wider flex items-center gap-1.5 transition-colors cursor-pointer"
+                              title="Ver e imprimir comprobante del servicio"
+                            >
+                              <Printer className="w-3.5 h-3.5 text-neutral-400" />
+                              <span>Comprobante / PDF</span>
+                            </button>
+                          )}
+
+                          <div className="flex items-center gap-1.5 font-mono">
+                            <span>💰 Total:</span>
+                            <strong className="text-emerald-400 text-sm">
+                              ${Number(item.monto).toLocaleString('es-AR')}
+                            </strong>
+                          </div>
                         </div>
                       </div>
                     </div>

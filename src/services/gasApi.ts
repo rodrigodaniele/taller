@@ -31,6 +31,9 @@ async function callGasApi<T = any>(payload: Record<string, any>): Promise<T> {
   }
 }
 
+// Cache temporal para evitar que el polling sobreescriba cambios optimistas recientes antes de que Google Sheets termine de guardar
+const recentPresupuestoStateUpdates: Record<string, { estado: Presupuesto['estado']; timestamp: number }> = {};
+
 export const gasApi = {
   async login(email: string, password: string): Promise<ApiResponse> {
     return callGasApi({
@@ -181,15 +184,31 @@ export const gasApi = {
         accion: 'obtenerPresupuestos',
       });
       if (res && res.resultado === 'ok' && Array.isArray(res.presupuestos)) {
-        localStorage.setItem('taller_presupuestos_v1', JSON.stringify(res.presupuestos));
-        return { success: true, presupuestos: res.presupuestos };
+        // Preservamos las actualizaciones de estado recientes hechas localmente para evitar sobrescrituras prematuras
+        const merged = res.presupuestos.map((p: Presupuesto) => {
+          const recent = recentPresupuestoStateUpdates[p.id];
+          if (recent && Date.now() - recent.timestamp < 20000) {
+            return { ...p, estado: recent.estado };
+          }
+          return p;
+        });
+
+        localStorage.setItem('taller_presupuestos_v1', JSON.stringify(merged));
+        return { success: true, presupuestos: merged };
       }
     } catch (e: any) {
       console.warn('Conexión con Google Sheets para presupuestos no disponible o script previo, leyendo caché local:', e);
     }
     const saved = localStorage.getItem('taller_presupuestos_v1');
     const list: Presupuesto[] = saved ? JSON.parse(saved) : [];
-    return { success: true, presupuestos: list };
+    const merged = list.map((p) => {
+      const recent = recentPresupuestoStateUpdates[p.id];
+      if (recent && Date.now() - recent.timestamp < 20000) {
+        return { ...p, estado: recent.estado };
+      }
+      return p;
+    });
+    return { success: true, presupuestos: merged };
   },
 
   async savePresupuesto(presupuesto: Presupuesto): Promise<{ success: boolean; error?: string }> {
@@ -234,6 +253,8 @@ export const gasApi = {
 
   async updatePresupuestoEstado(id: string, estado: Presupuesto['estado']): Promise<{ success: boolean; error?: string }> {
     try {
+      recentPresupuestoStateUpdates[id] = { estado, timestamp: Date.now() };
+
       const saved = localStorage.getItem('taller_presupuestos_v1');
       if (saved) {
         const list: Presupuesto[] = JSON.parse(saved);

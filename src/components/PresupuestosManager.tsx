@@ -177,33 +177,14 @@ export const PresupuestosManager = ({
   // Sincronización en tiempo real desde el Administrador cuando se reciben presupuestos actualizados
   useEffect(() => {
     if (presupuestosList && presupuestosList.length > 0) {
-      setPresupuestos(presupuestosList);
+      setPresupuestos((prev) => {
+        const prevKeys = prev.map((p) => `${p.id}_${p.estado}`).join('|');
+        const nextKeys = presupuestosList.map((p) => `${p.id}_${p.estado}`).join('|');
+        if (prevKeys === nextKeys) return prev;
+        return presupuestosList;
+      });
     }
   }, [presupuestosList]);
-
-  const [refreshingPresupuestos, setRefreshingPresupuestos] = useState(false);
-
-  const handleRefreshPresupuestos = async () => {
-    setRefreshingPresupuestos(true);
-    try {
-      const res = await gasApi.getPresupuestos();
-      if (res && res.success && Array.isArray(res.presupuestos)) {
-        setPresupuestos(res.presupuestos);
-        if (onPresupuestosUpdated) {
-          onPresupuestosUpdated(res.presupuestos);
-        }
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(res.presupuestos));
-        onShowToast('success', 'Presupuestos actualizados', `Se sincronizaron ${res.presupuestos.length} presupuestos desde Google Sheets.`);
-      } else {
-        onShowToast('info', 'Presupuestos sincronizados', 'Los presupuestos ya están al día.');
-      }
-    } catch (err) {
-      console.warn('Error al actualizar presupuestos:', err);
-      onShowToast('error', 'Falla de conexión', 'No se pudieron consultar los presupuestos en Google Sheets.');
-    } finally {
-      setRefreshingPresupuestos(false);
-    }
-  };
 
   // If a turno was passed to quote directly from the Turnos tab
   useEffect(() => {
