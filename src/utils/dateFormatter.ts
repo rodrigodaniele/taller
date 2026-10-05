@@ -69,26 +69,91 @@ export const calcularFechaVencimiento = (fechaStr?: string, validezDias = 7): st
 
 /**
  * Formatea el horario recibido desde Google Sheets o formularios.
- * Corrige el error común de Google Sheets cuando una celda de hora se serializa
- * como fecha base 1899 (ej: "1899-12-30T12:16:48.000Z") y lo convierte en "12:16".
+ * Corrige con precisión el desfasaje de Google Sheets cuando una celda de hora
+ * se serializa como fecha ISO UTC (ej: "1899-12-30T12:16:48.000Z" que corresponde a las "09:00" de Argentina).
  */
 export const formatearHorario = (horarioRaw: any): string => {
-  if (!horarioRaw) return '';
+  if (horarioRaw === undefined || horarioRaw === null || horarioRaw === '') return '';
+
+  // Caso 0: Número float de Excel/Sheets (ej: 0.375 = 09:00) o entero (ej: 9 = 09:00)
+  if (typeof horarioRaw === 'number') {
+    if (horarioRaw > 0 && horarioRaw < 1) {
+      const totalMinutes = Math.round(horarioRaw * 24 * 60);
+      const hr = Math.floor(totalMinutes / 60);
+      const min = totalMinutes % 60;
+      return `${String(hr).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+    }
+    if (horarioRaw >= 1 && horarioRaw <= 24) {
+      return `${String(Math.floor(horarioRaw)).padStart(2, '0')}:00`;
+    }
+  }
+
   const str = String(horarioRaw).replace(/['"]/g, '').trim();
   if (!str) return '';
 
-  // Caso 1: String ISO con 'T' (ej: "1899-12-30T12:16:48.000Z")
+  // Caso 1: String en formato Date string de JavaScript (ej: "Sat Dec 30 1899 09:00:00 GMT-0316...")
+  if (str.includes('GMT') || /^[A-Za-z]{3}\s+[A-Za-z]{3}/.test(str)) {
+    const gmtMatch = str.match(/\b(\d{1,2}):(\d{2}):\d{2}\b/);
+    if (gmtMatch) {
+      return `${gmtMatch[1].padStart(2, '0')}:${gmtMatch[2]}`;
+    }
+  }
+
+  // Caso 2: Formato ISO con 'T' proveniente de Google Sheets / Apps Script (ej: "1899-12-30T12:16:48.000Z" o "1899-12-30T12:00:00.000Z")
   if (str.includes('T')) {
-    const timePart = str.split('T')[1];
-    if (timePart) {
-      const match = timePart.match(/(\d{1,2}):(\d{2})/);
-      if (match) {
-        return `${match[1].padStart(2, '0')}:${match[2]}`;
+    // Si contiene la fecha base 1899 de Google Sheets o termina en Z (UTC)
+    if (str.includes('1899') || str.endsWith('Z')) {
+      try {
+        const d = new Date(str);
+        if (!isNaN(d.getTime())) {
+          // Intentar con Intl en zona horaria oficial de Argentina (Mendoza / Buenos Aires)
+          const formatter = new Intl.DateTimeFormat('es-AR', {
+            timeZone: 'America/Argentina/Buenos_Aires',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+          });
+          const parts = formatter.formatToParts(d);
+          const hrPart = parts.find((p) => p.type === 'hour')?.value;
+          const minPart = parts.find((p) => p.type === 'minute')?.value;
+          if (hrPart && minPart) {
+            let hr = parseInt(hrPart, 10);
+            let mn = parseInt(minPart, 10);
+            // Corregir residuo histórico de 16 minutos y 48 segundos de 1899
+            if (mn >= 14 && mn <= 18) mn = 0;
+            else if (mn >= 44 && mn <= 48) mn = 30;
+            return `${String(hr).padStart(2, '0')}:${String(mn).padStart(2, '0')}`;
+          }
+        }
+      } catch {}
+
+      // Fallback matemático exacto para Google Sheets en Argentina (UTC - 3:00 / UTC - 3:16)
+      const timePart = str.split('T')[1];
+      if (timePart) {
+        const match = timePart.match(/(\d{1,2}):(\d{2})/);
+        if (match) {
+          const utcHour = parseInt(match[1], 10);
+          const utcMin = parseInt(match[2], 10);
+          const localHour = (utcHour - 3 + 24) % 24;
+          let localMin = utcMin;
+          if (utcMin >= 14 && utcMin <= 18) localMin = 0;
+          else if (utcMin >= 44 && utcMin <= 48) localMin = 30;
+          return `${String(localHour).padStart(2, '0')}:${String(localMin).padStart(2, '0')}`;
+        }
+      }
+    } else {
+      // ISO local sin Z
+      const timePart = str.split('T')[1];
+      if (timePart) {
+        const match = timePart.match(/(\d{1,2}):(\d{2})/);
+        if (match) {
+          return `${match[1].padStart(2, '0')}:${match[2]}`;
+        }
       }
     }
   }
 
-  // Caso 2: Formato estándar con dos puntos (ej: "09:00", "9:30", "12:16:48")
+  // Caso 3: Formato horario estándar ya limpio (ej: "09:00", "9:00", "16:00")
   if (str.includes(':')) {
     const match = str.match(/(\d{1,2}):(\d{2})/);
     if (match) {
@@ -96,7 +161,7 @@ export const formatearHorario = (horarioRaw: any): string => {
     }
   }
 
-  // Caso 3: Solo número de hora (ej: "9" o "16")
+  // Caso 4: Solo número de hora (ej: "9" o "16")
   if (/^\d{1,2}$/.test(str)) {
     return `${str.padStart(2, '0')}:00`;
   }

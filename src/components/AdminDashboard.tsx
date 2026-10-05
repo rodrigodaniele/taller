@@ -749,6 +749,31 @@ function autorizarPermisosDeEmail() {
   Logger.log("Permisos autorizados correctamente. Correos disponibles hoy: " + MailApp.getRemainingDailyQuota());
 }
 
+// Formatea el horario de forma limpia y segura (evita desfasajes de zona horaria o fecha 1899)
+function formatearHoraParaAppsScript(val) {
+  if (!val) return "";
+  if (val instanceof Date) {
+    var h = val.getHours();
+    var m = val.getMinutes();
+    return (h < 10 ? "0" + h : h) + ":" + (m < 10 ? "0" + m : m);
+  }
+  var s = val.toString().replace(/['"]/g, "").trim();
+  if (s.indexOf("T") !== -1) {
+    var d = new Date(s);
+    if (!isNaN(d.getTime())) {
+      var h2 = d.getHours();
+      var m2 = d.getMinutes();
+      return (h2 < 10 ? "0" + h2 : h2) + ":" + (m2 < 10 ? "0" + m2 : m2);
+    }
+  }
+  var match = s.match(/(\\d{1,2}):(\\d{2})/);
+  if (match) {
+    var hNum = parseInt(match[1], 10);
+    return (hNum < 10 ? "0" + hNum : hNum) + ":" + match[2];
+  }
+  return s;
+}
+
 function doPost(e) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -886,7 +911,7 @@ function doPost(e) {
           if (rowsTurnos[j][0].toString().toLowerCase() === datos.email.toLowerCase()) {
             listaTurnos.push({
               "fecha": rowsTurnos[j][1],
-              "horario": rowsTurnos[j][2],
+              "horario": formatearHoraParaAppsScript(rowsTurnos[j][2]),
               "patente": rowsTurnos[j][3],
               "estado": rowsTurnos[j][4] ? rowsTurnos[j][4].toString() : "Programado"
             });
@@ -906,8 +931,10 @@ function doPost(e) {
         for (var k = 1; k < rowsTurnos.length; k++) {
           var fechaFila = String(rowsTurnos[k][1]).includes('T') ? String(rowsTurnos[k][1]).split('T')[0] : String(rowsTurnos[k][1]);
           if (fechaFila === datos.fecha && String(rowsTurnos[k][4]).toLowerCase() !== "cancelado") {
-            var horaFila = String(rowsTurnos[k][2]).includes('T') ? String(rowsTurnos[k][2]).split('T')[1].substring(0,5) : String(rowsTurnos[k][2]);
-            ocupados.push(horaFila);
+            var horaFila = formatearHoraParaAppsScript(rowsTurnos[k][2]);
+            if (horaFila) {
+              ocupados.push(horaFila);
+            }
           }
         }
       }
@@ -1177,7 +1204,7 @@ function obtenerTurnosAdmin() {
       pendientes.push({ 
         email: em, 
         fecha: datos[i][1], 
-        horario: datos[i][2], 
+        horario: formatearHoraParaAppsScript(datos[i][2]), 
         patente: datos[i][3],
         nombre: uInfo.nombre || "",
         telefono: uInfo.telefono || ""
