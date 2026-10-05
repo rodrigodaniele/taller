@@ -583,33 +583,47 @@ export const ClientDashboard = ({
   // Historial combinado sin duplicados (ni entre sí ni con presupuestos facturados)
   const listaHistorialCompleta = useMemo(() => {
     const list: any[] = [];
-    const seenKeys = new Set<string>();
 
-    const generarClave = (item: any): string => {
-      const pat = (item.patente || '').trim().toUpperCase();
-      const fechaNormalizada = formatearFechaArgentina(item.fecha);
-      const montoNum = Math.round(Number(String(item.monto || '').replace(/[^0-9.]/g, '')) || 0);
-      const nro = (item.numero || item.nroPresupuesto || '').trim().toUpperCase();
-      // Si tiene número de presupuesto oficial, la clave es única por número de presupuesto
-      if (nro) return `PRES_${nro}`;
-      // Si no, por patente + fecha normalizada + monto aproximado
-      return `${pat}_${fechaNormalizada}_${montoNum}`;
+    const sonElMismoServicio = (a: any, b: any): boolean => {
+      const patA = String(a.patente || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+      const patB = String(b.patente || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+      if (!patA || !patB || patA !== patB) return false;
+
+      const fechaA = formatearFechaArgentina(a.fecha);
+      const fechaB = formatearFechaArgentina(b.fecha);
+      if (!fechaA || !fechaB || fechaA !== fechaB) return false;
+
+      // Si coinciden patente y fecha, es el mismo vehículo en la misma fecha
+      const numA = (a.numero || a.nroPresupuesto || '').trim().toUpperCase();
+      const numB = (b.numero || b.nroPresupuesto || '').trim().toUpperCase();
+      if (numA && numB && numA === numB) return true;
+
+      // Comparar monto eliminando cualquier carácter no numérico (símbolos, puntos, comas)
+      const montoA = Math.round(Number(String(a.monto || '').replace(/[^0-9]/g, '')) || 0);
+      const montoB = Math.round(Number(String(b.monto || '').replace(/[^0-9]/g, '')) || 0);
+      if (montoA > 0 && montoB > 0 && Math.abs(montoA - montoB) < 100) return true;
+
+      // Comparar trabajo principal
+      const trabA = String(a.trabajo || '').toLowerCase().trim();
+      const trabB = String(b.trabajo || '').toLowerCase().trim();
+      if (trabA && trabB && (trabA.includes(trabB) || trabB.includes(trabA))) return true;
+
+      // Misma patente y misma fecha en el taller es el mismo servicio
+      return true;
     };
 
-    // 1. Agregar primero los presupuestos facturados locales (los más detallados y recientes)
+    // 1. Agregar primero los presupuestos facturados (contienen el comprobante oficial y botón PDF)
     facturadosComoHistorial.forEach((fact) => {
-      const key = generarClave(fact);
-      if (!seenKeys.has(key)) {
-        seenKeys.add(key);
+      const yaExiste = list.some((item) => sonElMismoServicio(item, fact));
+      if (!yaExiste) {
         list.push(fact);
       }
     });
 
     // 2. Agregar los registros históricos de Google Sheets que no hayan sido ya incluidos
     historialList.forEach((h) => {
-      const key = generarClave(h);
-      if (!seenKeys.has(key)) {
-        seenKeys.add(key);
+      const yaExiste = list.some((item) => sonElMismoServicio(item, h));
+      if (!yaExiste) {
         list.push(h);
       }
     });
