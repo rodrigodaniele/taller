@@ -197,8 +197,8 @@ export const ClientDashboard = ({
   };
 
   // Fetch client budgets & quotes
-  const loadClientPresupuestos = async () => {
-    setLoadingPresupuestos(true);
+  const loadClientPresupuestos = async (silent = false) => {
+    if (!silent) setLoadingPresupuestos(true);
     try {
       const res = await gasApi.getPresupuestos();
       if (res && res.success && Array.isArray(res.presupuestos)) {
@@ -218,12 +218,66 @@ export const ClientDashboard = ({
     } catch (err) {
       console.warn('Error loading client presupuestos:', err);
     } finally {
-      setLoadingPresupuestos(false);
+      if (!silent) setLoadingPresupuestos(false);
     }
   };
 
   useEffect(() => {
     loadClientPresupuestos();
+  }, [user.email, turnos]);
+
+  // Sincronización en tiempo real: cuando el admin cambia el estado del auto o presupuesto
+  useEffect(() => {
+    // 1. BroadcastChannel para sincronización instantánea (<10ms) entre pestañas y ventanas
+    let bc: BroadcastChannel | null = null;
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        bc = new BroadcastChannel('lacasadeladireccion_realtime');
+        bc.onmessage = () => {
+          loadClientPresupuestos(true);
+        };
+      } catch {}
+    }
+
+    // 2. Storage event para cambios de localStorage entre pestañas
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'taller_presupuestos_v1') {
+        loadClientPresupuestos(true);
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+
+    // 3. Evento interno personalizado
+    const handleCustomSync = () => {
+      loadClientPresupuestos(true);
+    };
+    window.addEventListener('taller_presupuesto_sync', handleCustomSync);
+
+    // 4. Evento de foco/visibilidad: si el cliente vuelve a la pestaña, refrescar al segundo
+    const handleFocus = () => {
+      loadClientPresupuestos(true);
+    };
+    window.addEventListener('focus', handleFocus);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        loadClientPresupuestos(true);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    // 5. Polling en segundo plano cada 7 segundos para sincronización entre distintos dispositivos (ej. PC y celular)
+    const interval = setInterval(() => {
+      loadClientPresupuestos(true);
+    }, 7000);
+
+    return () => {
+      if (bc) bc.close();
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('taller_presupuesto_sync', handleCustomSync);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      clearInterval(interval);
+    };
   }, [user.email, turnos]);
 
   useEffect(() => {
@@ -556,7 +610,7 @@ export const ClientDashboard = ({
             setActiveTab('presupuestos');
             setPresupuestoSeleccionadoModal(p);
           }}
-          onRefresh={loadClientPresupuestos}
+          onRefresh={() => loadClientPresupuestos()}
           refreshing={loadingPresupuestos}
         />
 
@@ -852,7 +906,7 @@ export const ClientDashboard = ({
 
               <button
                 type="button"
-                onClick={loadClientPresupuestos}
+                onClick={() => loadClientPresupuestos()}
                 disabled={loadingPresupuestos}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-800 text-xs font-heading font-bold uppercase tracking-wider transition-all cursor-pointer disabled:opacity-50"
               >

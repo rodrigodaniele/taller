@@ -1,4 +1,16 @@
-import { Wrench, CheckCircle2, Clock, Car, Phone, MessageCircle, AlertCircle, ArrowRight, ShieldCheck, MapPin, Sparkles } from 'lucide-react';
+import { useState } from 'react';
+import {
+  Wrench,
+  CheckCircle2,
+  Clock,
+  Car,
+  MessageCircle,
+  AlertCircle,
+  ArrowRight,
+  ShieldCheck,
+  MapPin,
+  X,
+} from 'lucide-react';
 import { Presupuesto, Turno } from '../types';
 import { formatearFechaArgentina } from '../utils/dateFormatter';
 
@@ -14,18 +26,55 @@ interface VehicleStatusWitnessProps {
 export const VehicleStatusWitness = ({
   presupuestos,
   turnosProgramados,
-  userNombre,
   onVerPresupuesto,
 }: VehicleStatusWitnessProps) => {
-  // Encontrar vehículos activos (no rechazados ni archivados hace tiempo)
-  // Priorizar presupuestos en curso: trabajo_terminado > en_reparacion > ingreso_taller > aprobado > pendiente > facturado
-  const activePresupuestos = presupuestos.filter((p) => p.estado !== 'rechazado');
+  // IDs de presupuestos en 'trabajo_terminado' que el cliente ya confirmó haber retirado
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(() => {
+    const set = new Set<string>();
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('testigo_retirado_')) {
+          set.add(k.replace('testigo_retirado_', ''));
+        }
+      }
+    } catch {}
+    return set;
+  });
 
-  // Si no hay ningún presupuesto pero sí hay un turno programado pendiente
+  const handleConfirmarRetiro = (id: string) => {
+    try {
+      localStorage.setItem(`testigo_retirado_${id}`, 'true');
+    } catch {}
+    setDismissedIds((prev) => new Set([...prev, id]));
+  };
+
+  // Encontrar vehículos activos en el taller:
+  // 1. Se excluye 'rechazado' (el cliente o taller no aceptó la cotización, no hay auto en reparación)
+  // 2. Se excluye 'facturado' (cuando está facturado el servicio está concluido y cobrado, el auto ya salió del taller)
+  // 3. Se excluye si está en 'trabajo_terminado' y el cliente ya confirmó el retiro con el botón
+  const activePresupuestos = presupuestos.filter((p) => {
+    if (p.estado === 'rechazado' || p.estado === 'facturado') return false;
+    if (p.estado === 'trabajo_terminado' && dismissedIds.has(p.id)) return false;
+    return true;
+  });
+
+  // Si no hay ningún presupuesto activo pero sí hay un turno programado pendiente
   const primerTurno = turnosProgramados.length > 0 ? turnosProgramados[0] : null;
 
-  if (activePresupuestos.length === 0 && !primerTurno) {
-    return null;
+  // Si el turno existente ya tuvo un presupuesto que fue rechazado o facturado, tampoco se debe mostrar el cartel de espera
+  const turnoConPresupuestoCerrado = primerTurno && presupuestos.some(
+    (p) =>
+      p.patente.toUpperCase().trim() === primerTurno.patente.toUpperCase().trim() &&
+      (p.estado === 'rechazado' || p.estado === 'facturado')
+  );
+
+  // Si no hay autos activos en el taller, o si el presupuesto fue rechazado/facturado,
+  // el testigo se apaga por completo (pantalla limpia sin carteles)
+  if (activePresupuestos.length === 0) {
+    if (!primerTurno || turnoConPresupuestoCerrado) {
+      return null;
+    }
   }
 
   // Si no hay presupuestos cargados aún pero hay turno agendado
@@ -70,21 +119,20 @@ export const VehicleStatusWitness = ({
   }
 
   // Tomamos el presupuesto más relevante para el testigo
-  // Si hay uno en trabajo_terminado o en_reparacion, le damos máxima prioridad
+  // Prioridad: trabajo_terminado > en_reparacion > ingreso_taller > aprobado > pendiente
   const sortedPresupuestos = [...activePresupuestos].sort((a, b) => {
     const orden: Record<string, number> = {
-      trabajo_terminado: 6,
-      en_reparacion: 5,
-      ingreso_taller: 4,
-      aprobado: 3,
-      pendiente: 2,
-      facturado: 1,
-      rechazado: 0,
+      trabajo_terminado: 5,
+      en_reparacion: 4,
+      ingreso_taller: 3,
+      aprobado: 2,
+      pendiente: 1,
     };
     return (orden[b.estado] || 0) - (orden[a.estado] || 0);
   });
 
   const p = sortedPresupuestos[0];
+  if (!p) return null;
 
   // Configuración de etapas para el Testigo
   const getStageInfo = (estado: Presupuesto['estado']) => {
@@ -98,7 +146,7 @@ export const VehicleStatusWitness = ({
           title: '🎉 ¡TRABAJO TERMINADO! TU AUTO ESTÁ LISTO',
           desc: `El trabajo en tu ${p.vehiculoModelo || 'vehículo'} (${p.patente}) fue completado, alineado y testeado con éxito por Rodrigo. Ya podés pasar a retirarlo por el taller.`,
           icon: <CheckCircle2 className="w-8 h-8 text-emerald-400 animate-bounce" />,
-          actionLabel: '📲 Avisar por WhatsApp que voy a retirar',
+          actionLabel: '📲 Avisar que voy a retirar',
           actionUrl: `https://wa.me/5492625532070?text=${encodeURIComponent(
             `Hola Rodrigo! 👋 Veo en el panel que mi auto (*${p.patente}* - ${p.vehiculoModelo || ''}) ya está terminado y LISTO PARA RETIRAR. Te aviso que voy en camino al taller!`
           )}`,
@@ -148,6 +196,7 @@ export const VehicleStatusWitness = ({
         };
 
       case 'pendiente':
+      default:
         return {
           step: 1,
           color: 'from-amber-950/60 via-neutral-900 to-neutral-950 border-amber-600/60 shadow-amber-900/20',
@@ -157,20 +206,6 @@ export const VehicleStatusWitness = ({
           desc: `Rodrigo cargó el presupuesto para tu auto por un total de $${p.total.toLocaleString('es-AR')}. Revisá el detalle de mano de obra y repuestos para darnos el OK y comenzar.`,
           icon: <AlertCircle className="w-8 h-8 text-amber-400" />,
           actionLabel: '✅ Ver y Aprobar Presupuesto',
-          onActionClick: () => onVerPresupuesto(p),
-        };
-
-      case 'facturado':
-      default:
-        return {
-          step: 5,
-          color: 'from-neutral-950 via-neutral-900 to-neutral-950 border-neutral-800',
-          badgeBg: 'bg-neutral-800 text-neutral-300',
-          badgeText: '🏁 VEHÍCULO ENTREGADO',
-          title: '🚗 SERVICIO CONCLUIDO Y ENTREGADO',
-          desc: `Tu vehículo (${p.patente}) completó su servicio en el taller. El comprobante y garantía quedaron asentados en tu historial clínico automotor.`,
-          icon: <ShieldCheck className="w-8 h-8 text-emerald-500" />,
-          actionLabel: 'Ver Ficha de Servicio',
           onActionClick: () => onVerPresupuesto(p),
         };
     }
@@ -189,6 +224,19 @@ export const VehicleStatusWitness = ({
 
   return (
     <div className={`relative overflow-hidden rounded-2xl bg-gradient-to-br ${stage.color} border-2 p-5 sm:p-7 shadow-2xl transition-all duration-300`}>
+      {/* Botón rápido de cierre para el cliente si está listo para retirar */}
+      {p.estado === 'trabajo_terminado' && (
+        <button
+          type="button"
+          onClick={() => handleConfirmarRetiro(p.id)}
+          className="absolute top-4 right-4 text-neutral-400 hover:text-white p-1.5 rounded-lg bg-neutral-950/80 hover:bg-neutral-900 transition-colors cursor-pointer border border-neutral-700/60 z-10 flex items-center gap-1 text-[11px] font-heading uppercase"
+          title="Cerrar este cartel porque ya retiré mi vehículo"
+        >
+          <X className="w-4 h-4" />
+          <span className="hidden sm:inline">Cerrar</span>
+        </button>
+      )}
+
       {/* Fondo decorativo de taller con glow */}
       <div className="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 rounded-full bg-red-600/10 blur-3xl pointer-events-none" />
 
@@ -222,9 +270,30 @@ export const VehicleStatusWitness = ({
           </div>
         </div>
 
-        {/* Botón de acción principal */}
+        {/* Botones de acción del Testigo */}
         <div className="shrink-0 w-full md:w-auto flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-          {stage.actionUrl ? (
+          {p.estado === 'trabajo_terminado' ? (
+            <>
+              <button
+                type="button"
+                onClick={() => handleConfirmarRetiro(p.id)}
+                className="px-4 py-3 rounded-xl bg-neutral-950 hover:bg-neutral-900 text-emerald-400 hover:text-emerald-300 border border-emerald-500/50 font-heading font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg transition-all cursor-pointer"
+                title="Confirmar que ya retiraste el auto para cerrar este aviso de tu pantalla"
+              >
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                <span>Confirmar Retiro (Cerrar)</span>
+              </button>
+              <a
+                href={stage.actionUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-5 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-heading font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/30 transition-all cursor-pointer"
+              >
+                <MessageCircle className="w-4 h-4" />
+                <span>{stage.actionLabel}</span>
+              </a>
+            </>
+          ) : stage.actionUrl ? (
             <a
               href={stage.actionUrl}
               target="_blank"
@@ -307,12 +376,21 @@ export const VehicleStatusWitness = ({
                 </span>
               </div>
             </div>
-            <a
-              href="tel:2625532070"
-              className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-black font-heading font-black uppercase text-[11px] tracking-wider shrink-0"
-            >
-              📞 Llamar al Taller (2625 532070)
-            </a>
+            <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
+              <button
+                type="button"
+                onClick={() => handleConfirmarRetiro(p.id)}
+                className="flex-1 sm:flex-none px-3.5 py-2 rounded-lg bg-emerald-900/90 hover:bg-emerald-800 text-white border border-emerald-400 font-heading font-black uppercase text-[11px] tracking-wider transition-colors cursor-pointer shadow-md"
+              >
+                ✓ Ya lo retiré (Cerrar)
+              </button>
+              <a
+                href="tel:2625532070"
+                className="flex-1 sm:flex-none text-center px-3.5 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-heading font-black uppercase text-[11px] tracking-wider"
+              >
+                📞 Llamar al Taller
+              </a>
+            </div>
           </div>
         )}
       </div>

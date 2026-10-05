@@ -118,7 +118,7 @@ export const PresupuestosManager = ({
 
   // Filter & Search
   const [searchTerm, setSearchTerm] = useState('');
-  const [filtroEstado, setFiltroEstado] = useState<'todos' | 'pendiente' | 'aprobado' | 'rechazado' | 'facturado'>('todos');
+  const [filtroEstado, setFiltroEstado] = useState<'todos' | Presupuesto['estado']>('todos');
 
   // Modals
   const [showModalForm, setShowModalForm] = useState(false);
@@ -978,25 +978,45 @@ export const PresupuestosManager = ({
         {/* Filter bar by status */}
         <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-neutral-800/80">
           <div className="flex flex-wrap items-center gap-1.5">
-            {(['todos', 'pendiente', 'aprobado', 'rechazado', 'facturado'] as const).map((est) => {
+            {([
+              { id: 'todos', label: 'Todos', activeClass: 'bg-red-600 text-white shadow-md shadow-red-950' },
+              { id: 'pendiente', label: 'Pendiente', dotColor: 'bg-amber-400', activeClass: 'bg-amber-600 text-white shadow-md shadow-amber-950' },
+              { id: 'aprobado', label: 'Aprobado', dotColor: 'bg-blue-400', activeClass: 'bg-blue-600 text-white shadow-md shadow-blue-950' },
+              { id: 'ingreso_taller', label: 'En Taller', dotColor: 'bg-purple-400', activeClass: 'bg-purple-600 text-white shadow-md shadow-purple-950' },
+              { id: 'en_reparacion', label: 'En Reparación', dotColor: 'bg-orange-400', activeClass: 'bg-orange-600 text-white shadow-md shadow-orange-950' },
+              { id: 'trabajo_terminado', label: 'Terminado', dotColor: 'bg-emerald-400', activeClass: 'bg-emerald-600 text-white shadow-md shadow-emerald-950' },
+              { id: 'facturado', label: 'Facturado', dotColor: 'bg-zinc-300', activeClass: 'bg-zinc-200 text-zinc-950 font-black shadow-md' },
+              { id: 'rechazado', label: 'Rechazado', dotColor: 'bg-neutral-500', activeClass: 'bg-neutral-700 text-white shadow-md' },
+            ] as const).map((est) => {
               const count =
-                est === 'todos'
+                est.id === 'todos'
                   ? presupuestos.length
-                  : presupuestos.filter((p) => p.estado === est).length;
+                  : presupuestos.filter((p) => p.estado === est.id).length;
+
+              const isSelected = filtroEstado === est.id;
 
               return (
                 <button
                   type="button"
-                  key={est}
-                  onClick={() => setFiltroEstado(est)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-heading font-bold uppercase transition-colors cursor-pointer flex items-center gap-1.5 ${
-                    filtroEstado === est
-                      ? 'bg-red-600 text-white shadow-md shadow-red-950'
-                      : 'bg-neutral-950 text-neutral-400 hover:text-white border border-neutral-800'
+                  key={est.id}
+                  onClick={() => setFiltroEstado(est.id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-heading font-bold uppercase transition-all cursor-pointer flex items-center gap-1.5 ${
+                    isSelected
+                      ? est.activeClass
+                      : 'bg-neutral-950 text-neutral-400 hover:text-white border border-neutral-800 hover:border-neutral-700'
                   }`}
                 >
-                  <span>{est}</span>
-                  <span className="font-mono text-[10px] opacity-80">({count})</span>
+                  {'dotColor' in est && est.dotColor && (
+                    <span className={`w-2 h-2 rounded-full ${isSelected ? 'bg-white' : est.dotColor}`} />
+                  )}
+                  <span>{est.label}</span>
+                  <span
+                    className={`font-mono text-[10px] px-1 py-0.2 rounded ${
+                      isSelected ? 'bg-black/30' : 'bg-neutral-900 text-neutral-400'
+                    }`}
+                  >
+                    ({count})
+                  </span>
                 </button>
               );
             })}

@@ -204,6 +204,18 @@ export const gasApi = {
         list.unshift(presupuesto);
       }
       localStorage.setItem('taller_presupuestos_v1', JSON.stringify(list));
+
+      // Broadcast update across open tabs/windows in real time
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('taller_presupuesto_sync', { detail: { presupuesto } }));
+        if (typeof BroadcastChannel !== 'undefined') {
+          try {
+            const bc = new BroadcastChannel('lacasadeladireccion_realtime');
+            bc.postMessage({ type: 'PRESUPUESTO_SAVED', presupuesto });
+            bc.close();
+          } catch {}
+        }
+      }
     } catch (e) {
       console.error(e);
     }
@@ -227,6 +239,18 @@ export const gasApi = {
         const list: Presupuesto[] = JSON.parse(saved);
         const updated = list.map((p) => (p.id === id ? { ...p, estado } : p));
         localStorage.setItem('taller_presupuestos_v1', JSON.stringify(updated));
+      }
+
+      // Broadcast update across open tabs/windows in real time
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('taller_presupuesto_sync', { detail: { id, estado } }));
+        if (typeof BroadcastChannel !== 'undefined') {
+          try {
+            const bc = new BroadcastChannel('lacasadeladireccion_realtime');
+            bc.postMessage({ type: 'PRESUPUESTO_ESTADO_CHANGED', id, estado });
+            bc.close();
+          } catch {}
+        }
       }
     } catch (e) {
       console.error(e);
