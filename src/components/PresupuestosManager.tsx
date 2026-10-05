@@ -432,16 +432,6 @@ export const PresupuestosManager = ({
 
       // 3. Registrar automáticamente en la hoja Detalles_Turnos y pasar turno a Atendido en Google Sheets
       try {
-        gasApi.saveAdminWork({
-          email: p.clienteEmail || (p.patente.toLowerCase() + '@cliente.taller'),
-          fecha: p.fecha || new Date().toISOString().split('T')[0],
-          horario: '',
-          patente: p.patente,
-          kilometraje: p.kilometraje || 'S/D',
-          trabajoRealizado: `Presupuesto ${p.numero}: ` + (p.items?.map((it) => it.descripcion).join(' + ') || p.observaciones || 'Servicio Facturado'),
-          montoFinal: String(p.total),
-        }).catch((err) => console.warn(err));
-
         gasApi.facturarPresupuestoYArchivar(p).catch((err) => console.warn(err));
       } catch (err) {}
 

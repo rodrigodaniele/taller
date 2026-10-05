@@ -566,10 +566,13 @@ export const ClientDashboard = ({
       .filter((p) => p.estado === 'facturado')
       .map((p) => ({
         id: p.id,
-        patente: p.patente,
+        numero: p.numero,
+        patente: (p.patente || '').trim().toUpperCase(),
         modelo: p.vehiculoModelo || '',
         fecha: p.fecha,
-        trabajo: p.items.map((it) => `${it.cantidad > 1 ? `${it.cantidad}x ` : ''}${it.descripcion}`).join(' · '),
+        trabajo: p.items && p.items.length > 0
+          ? p.items.map((it) => `${it.cantidad > 1 ? `${it.cantidad}x ` : ''}${it.descripcion}`).join(' · ')
+          : (p.observaciones || 'Servicio Integral'),
         kilometraje: p.kilometraje || 'S/D',
         monto: String(p.total),
         esPresupuestoFacturado: true,
@@ -577,20 +580,40 @@ export const ClientDashboard = ({
       }));
   }, [presupuestos]);
 
-  // Historial combinado (Detalles_Turnos de Sheets + presupuestos facturados) sin duplicados
+  // Historial combinado sin duplicados (ni entre sí ni con presupuestos facturados)
   const listaHistorialCompleta = useMemo(() => {
-    const list: any[] = [...historialList];
+    const list: any[] = [];
+    const seenKeys = new Set<string>();
+
+    const generarClave = (item: any): string => {
+      const pat = (item.patente || '').trim().toUpperCase();
+      const fechaNormalizada = formatearFechaArgentina(item.fecha);
+      const montoNum = Math.round(Number(String(item.monto || '').replace(/[^0-9.]/g, '')) || 0);
+      const nro = (item.numero || item.nroPresupuesto || '').trim().toUpperCase();
+      // Si tiene número de presupuesto oficial, la clave es única por número de presupuesto
+      if (nro) return `PRES_${nro}`;
+      // Si no, por patente + fecha normalizada + monto aproximado
+      return `${pat}_${fechaNormalizada}_${montoNum}`;
+    };
+
+    // 1. Agregar primero los presupuestos facturados locales (los más detallados y recientes)
     facturadosComoHistorial.forEach((fact) => {
-      const yaExiste = list.some(
-        (h) =>
-          h.patente &&
-          h.patente.toUpperCase().trim() === fact.patente.toUpperCase().trim() &&
-          String(h.fecha).substring(0, 10) === String(fact.fecha).substring(0, 10)
-      );
-      if (!yaExiste) {
-        list.unshift(fact);
+      const key = generarClave(fact);
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        list.push(fact);
       }
     });
+
+    // 2. Agregar los registros históricos de Google Sheets que no hayan sido ya incluidos
+    historialList.forEach((h) => {
+      const key = generarClave(h);
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        list.push(h);
+      }
+    });
+
     return list;
   }, [historialList, facturadosComoHistorial]);
 

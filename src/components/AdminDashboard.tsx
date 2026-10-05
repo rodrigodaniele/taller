@@ -1384,6 +1384,17 @@ function registrarTrabajoDesdePresupuesto(p) {
   var montoFmt = Number(p.total) || 0;
   var nroPres = p.numero || "";
 
+  // Evitar duplicados en Detalles_Turnos si ya se registró este presupuesto
+  if (sheetDetalles.getLastRow() > 1) {
+    var datosDetalles = sheetDetalles.getDataRange().getValues();
+    for (var d = 1; d < datosDetalles.length; d++) {
+      var nroPresFila = datosDetalles[d][8] ? datosDetalles[d][8].toString().trim() : "";
+      if (nroPres && nroPresFila === nroPres) {
+        return { success: true, duplicadoEvitado: true };
+      }
+    }
+  }
+
   sheetDetalles.appendRow([
     emailCliente,
     "'" + fechaFmt,
@@ -1453,6 +1464,7 @@ function obtenerHistorialCliente(emailCliente) {
   
   var datos = sheetDetalles.getDataRange().getValues();
   var historialUsuario = [];
+  var vistos = {};
   
   for (var i = 1; i < datos.length; i++) {
     var emailFila = datos[i][0] ? datos[i][0].toString().toLowerCase().trim() : "";
@@ -1462,6 +1474,7 @@ function obtenerHistorialCliente(emailCliente) {
       var kmVal = "";
       var trabajoVal = "";
       var montoVal = "";
+      var nroPresVal = datos[i][8] ? datos[i][8].toString().trim() : "";
 
       if (tieneColumnaModelo) {
         modeloVal = datos[i][4] ? datos[i][4].toString() : "";
@@ -1475,15 +1488,24 @@ function obtenerHistorialCliente(emailCliente) {
         if (datos[i][7]) modeloVal = datos[i][7].toString();
       }
 
-      historialUsuario.push({
-        fecha: datos[i][1] ? datos[i][1].toString().replace("'", "") : "",
-        horario: datos[i][2] ? datos[i][2].toString() : "",
-        patente: datos[i][3] ? datos[i][3].toString().toUpperCase() : "",
-        modelo: modeloVal,
-        kilometraje: kmVal,
-        trabajo: trabajoVal,
-        monto: montoVal
-      });
+      var patFila = datos[i][3] ? datos[i][3].toString().toUpperCase().trim() : "";
+      var fechaFila = datos[i][1] ? datos[i][1].toString().replace("'", "").trim() : "";
+      var montoNum = Math.round(Number(montoVal) || 0);
+      var keyUnica = nroPresVal ? ("PRES_" + nroPresVal) : (patFila + "_" + fechaFila.substring(0, 10) + "_" + montoNum);
+
+      if (!vistos[keyUnica]) {
+        vistos[keyUnica] = true;
+        historialUsuario.push({
+          fecha: fechaFila,
+          horario: datos[i][2] ? datos[i][2].toString() : "",
+          patente: patFila,
+          modelo: modeloVal,
+          kilometraje: kmVal,
+          trabajo: trabajoVal,
+          monto: montoVal,
+          numero: nroPresVal
+        });
+      }
     }
   }
   historialUsuario.reverse();
