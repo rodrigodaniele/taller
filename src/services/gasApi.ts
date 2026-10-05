@@ -113,6 +113,18 @@ export const gasApi = {
     });
   },
 
+  async marcarTurnoAtendido(patente: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      return await callGasApi({
+        accion: 'marcarTurnoAtendido',
+        patente: patente.trim().toUpperCase(),
+      });
+    } catch (e: any) {
+      console.warn('Aviso: Guardado localmente el turno atendido:', e);
+      return { success: true };
+    }
+  },
+
   async getClientHistory(emailCliente: string): Promise<{ success: boolean; historial: any[]; error?: string }> {
     return callGasApi({
       accion: 'obtenerHistorialCliente',

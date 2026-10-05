@@ -174,6 +174,23 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
 
         const pendientes = filtrarTurnosPendientes(res.turnos, currentPresupuestos);
         setTurnos(pendientes);
+
+        // Auto-reparación en Google Sheets: si en la planilla Turnos todavía figura como 'Programado'
+        // un vehículo que ya fue facturado o atendido, le enviamos la orden a Google Sheets para pasarlo a 'Atendido'.
+        try {
+          const atendidosSet = getTurnosAtendidosSet();
+          const patentesFacturadas = new Set(
+            currentPresupuestos
+              .filter((p) => p.estado === 'facturado')
+              .map((p) => (p.patente || '').toUpperCase().trim())
+          );
+          res.turnos.forEach((t) => {
+            const cleanP = (t.patente || '').toUpperCase().trim();
+            if (cleanP && (atendidosSet.has(cleanP) || patentesFacturadas.has(cleanP))) {
+              gasApi.marcarTurnoAtendido(cleanP).catch(() => {});
+            }
+          });
+        } catch {}
       } else {
         setTurnos([]);
         if (res.error && !silent) onShowToast('error', 'Error en Google Sheets', res.error);
@@ -514,6 +531,7 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
       if (res.success) {
         marcarTurnoAtendidoLocal(selectedTurno.patente);
         setTurnos((prev) => prev.filter((t) => (t.patente || '').trim().toUpperCase() !== selectedTurno.patente.trim().toUpperCase()));
+        gasApi.marcarTurnoAtendido(selectedTurno.patente).catch(() => {});
 
         // Impactar en rotación de stock de repuestos utilizados en el taller
         try {
@@ -554,6 +572,7 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
     const cleanPat = patente.trim().toUpperCase();
     marcarTurnoAtendidoLocal(cleanPat);
     setTurnos((prev) => prev.filter((t) => (t.patente || '').trim().toUpperCase() !== cleanPat));
+    gasApi.marcarTurnoAtendido(cleanPat).catch(() => {});
   };
 
   // Registrar gasto en Contabilidad cuando se compre stock de repuestos
@@ -1130,6 +1149,12 @@ function doPost(e) {
       var resCompraStock = ingresarCompraStockSheet(datos.datos);
       return ContentService.createTextOutput(JSON.stringify(resCompraStock)).setMimeType(ContentService.MimeType.JSON);
     }
+
+    // --- ACCIÓN 21: MARCAR TURNO COMO ATENDIDO DIRECTAMENTE POR PATENTE ---
+    if (datos.accion === "marcarTurnoAtendido") {
+      var resAtendido = pasarTurnoAAtendidoPorPatente(datos.patente);
+      return ContentService.createTextOutput(JSON.stringify(resAtendido)).setMimeType(ContentService.MimeType.JSON);
+    }
                            
   } catch(error) {
     return ContentService.createTextOutput(JSON.stringify({"resultado": "error", "mensaje": error.toString()})).setMimeType(ContentService.MimeType.JSON);
@@ -1256,6 +1281,38 @@ function ejecutarLimpiezaYOrdenamientoCompleto() {
   pasados.sort(function(a,b) { return new Date(b[1].toString().replace("'","")+"T"+b[2].toString().replace("'","")) - new Date(a[1].toString().replace("'","")+"T"+a[2].toString().replace("'","")); });
   
   range.setValues(futuros.concat(pasados));
+}
+
+function limpiarPatenteParaComparacion(p) {
+  if (!p) return "";
+  return p.toString().replace(/[^a-zA-Z0-9]/g, "").toUpperCase().trim();
+}
+
+function pasarTurnoAAtendidoPorPatente(patente) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetTurnos = ss.getSheetByName("Turnos");
+  if (!sheetTurnos) return { success: false, error: "No se encontró hoja Turnos" };
+  
+  var target = limpiarPatenteParaComparacion(patente);
+  if (!target) return { success: false, error: "Patente vacía" };
+  
+  var lastRow = sheetTurnos.getLastRow();
+  if (lastRow <= 1) return { success: true, actualizados: 0 };
+  
+  var data = sheetTurnos.getDataRange().getValues();
+  var actualizados = 0;
+  
+  for (var i = 1; i < data.length; i++) {
+    var patFila = limpiarPatenteParaComparacion(data[i][3]);
+    var estFila = data[i][4] ? data[i][4].toString().trim().toLowerCase() : "";
+    if (patFila === target && estFila !== "atendido" && estFila !== "cancelado") {
+      sheetTurnos.getRange(i + 1, 5).setValue("Atendido");
+      actualizados++;
+    }
+  }
+  
+  ejecutarLimpiezaYOrdenamientoCompleto();
+  return { success: true, actualizados: actualizados };
 }
 
 function obtenerTurnosAdmin() {
@@ -1468,45 +1525,50 @@ function registrarTrabajoDesdePresupuesto(p) {
   var montoFmt = Number(p.total) || 0;
   var nroPres = p.numero || "";
 
-  // Evitar duplicados en Detalles_Turnos si ya se registró este presupuesto
+  // 1. SIEMPRE pasar el turno a 'Atendido' en la hoja 'Turnos' buscando la patente
+  if (sheetTurnos && patenteFmt) {
+    pasarTurnoAAtendidoPorPatente(patenteFmt);
+  }
+
+  // 2. SIEMPRE actualizar el estado del presupuesto a 'facturado' en la hoja 'Presupuestos'
+  if (p.id) {
+    try {
+      actualizarEstadoPresupuestoSheet(p.id, "facturado");
+    } catch(ePres) {}
+  }
+
+  // 3. Impactar en la hoja 'Stock': sumar a rotación de repuestos y descontar si hay stock físico
+  if (Array.isArray(p.items) && p.items.length > 0) {
+    try {
+      actualizarRotacionStockSheet(p.items, modeloFmt || patenteFmt);
+    } catch(eStock) {}
+  }
+
+  // 4. Registrar en Detalles_Turnos (evitando duplicar fila en el historial)
+  var yaExisteEnDetalles = false;
   if (sheetDetalles.getLastRow() > 1) {
     var datosDetalles = sheetDetalles.getDataRange().getValues();
     for (var d = 1; d < datosDetalles.length; d++) {
       var nroPresFila = datosDetalles[d][8] ? datosDetalles[d][8].toString().trim() : "";
       if (nroPres && nroPresFila === nroPres) {
-        return { success: true, duplicadoEvitado: true };
-      }
-    }
-  }
-
-  sheetDetalles.appendRow([
-    emailCliente,
-    "'" + fechaFmt,
-    horaFmt ? ("'" + horaFmt) : "",
-    patenteFmt,
-    modeloFmt,
-    kmFmt,
-    trabajoResumen,
-    montoFmt,
-    nroPres
-  ]);
-
-  // Actualizar el turno en hoja 'Turnos' a 'Atendido'
-  if (sheetTurnos) {
-    var datosTurnos = sheetTurnos.getDataRange().getValues();
-    for (var i = 1; i < datosTurnos.length; i++) {
-      var patFila = datosTurnos[i][3] ? datosTurnos[i][3].toString().replace("'", "").trim().toUpperCase() : "";
-      var estFila = datosTurnos[i][4] ? datosTurnos[i][4].toString().trim().toLowerCase() : "";
-      if (patFila === patenteFmt && (estFila === "programado" || estFila === "")) {
-        sheetTurnos.getRange(i + 1, 5).setValue("Atendido");
+        yaExisteEnDetalles = true;
         break;
       }
     }
   }
 
-  // Impactar en la hoja 'Stock': sumar a rotación de repuestos y descontar si hay stock físico
-  if (Array.isArray(p.items) && p.items.length > 0) {
-    actualizarRotacionStockSheet(p.items, modeloFmt || patenteFmt);
+  if (!yaExisteEnDetalles) {
+    sheetDetalles.appendRow([
+      emailCliente,
+      "'" + fechaFmt,
+      horaFmt ? ("'" + horaFmt) : "",
+      patenteFmt,
+      modeloFmt,
+      kmFmt,
+      trabajoResumen,
+      montoFmt,
+      nroPres
+    ]);
   }
 
   ejecutarLimpiezaYOrdenamientoCompleto();
@@ -1534,21 +1596,19 @@ function registrarTrabajoAdmin(datosTrabajo) {
     ""
   ]);
   
-  if (sheetTurnos) {
-    var datosTurnos = sheetTurnos.getDataRange().getValues();
-    for (var i = 1; i < datosTurnos.length; i++) {
-      if (String(datosTurnos[i][3]).toLowerCase().trim() === datosTrabajo.patente.toLowerCase().trim()) {
-        sheetTurnos.getRange(i + 1, 5).setValue("Atendido");
-        break;
-      }
-    }
+  // SIEMPRE marcar en 'Turnos' a 'Atendido'
+  if (sheetTurnos && datosTrabajo.patente) {
+    pasarTurnoAAtendidoPorPatente(datosTrabajo.patente);
   }
 
   // Actualizar rotación histórica en la hoja 'Stock'
   if (datosTrabajo && datosTrabajo.trabajoRealizado) {
-    actualizarRotacionDesdeTextoAdminSheet(datosTrabajo.trabajoRealizado, datosTrabajo.patente);
+    try {
+      actualizarRotacionDesdeTextoAdminSheet(datosTrabajo.trabajoRealizado, datosTrabajo.patente);
+    } catch(eStockAdmin) {}
   }
 
+  ejecutarLimpiezaYOrdenamientoCompleto();
   return { success: true };
 }
 

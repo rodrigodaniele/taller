@@ -433,6 +433,7 @@ export const PresupuestosManager = ({
       // 3. Registrar automáticamente en la hoja Detalles_Turnos y pasar turno a Atendido en Google Sheets
       try {
         gasApi.facturarPresupuestoYArchivar(p).catch((err) => console.warn(err));
+        gasApi.marcarTurnoAtendido(p.patente).catch((err) => console.warn(err));
       } catch (err) {}
 
       // 4. Actualizar radar de rotación histórica de repuestos y descontar del inventario si hay stock físico
