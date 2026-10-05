@@ -3,7 +3,7 @@ import { TurnoAdmin, DatosTrabajoAdmin, MovimientoContable, Presupuesto } from '
 import { gasApi } from '../services/gasApi';
 import { WORKSHOP_ITEMS, GASTOS_PREDEFINIDOS } from '../constants/workshopItems';
 import { PresupuestosManager } from './PresupuestosManager';
-import { formatearFechaArgentina } from '../utils/dateFormatter';
+import { formatearFechaArgentina, formatearHorario } from '../utils/dateFormatter';
 import {
   ShieldAlert,
   Search,
@@ -1583,7 +1583,7 @@ function doOptions(e) {
                               <div className="flex items-center gap-1.5">
                                 <Clock className="w-3.5 h-3.5 text-neutral-500" />
                                 <span className="text-white font-semibold">
-                                  {String(turno.horario).replace("'", '')} hs
+                                  {formatearHorario(turno.horario)} hs
                                 </span>
                               </div>
                               <div className="flex items-center gap-1.5">

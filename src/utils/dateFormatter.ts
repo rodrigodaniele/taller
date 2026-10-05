@@ -66,3 +66,40 @@ export const calcularFechaVencimiento = (fechaStr?: string, validezDias = 7): st
     return '';
   }
 };
+
+/**
+ * Formatea el horario recibido desde Google Sheets o formularios.
+ * Corrige el error común de Google Sheets cuando una celda de hora se serializa
+ * como fecha base 1899 (ej: "1899-12-30T12:16:48.000Z") y lo convierte en "12:16".
+ */
+export const formatearHorario = (horarioRaw: any): string => {
+  if (!horarioRaw) return '';
+  const str = String(horarioRaw).replace(/['"]/g, '').trim();
+  if (!str) return '';
+
+  // Caso 1: String ISO con 'T' (ej: "1899-12-30T12:16:48.000Z")
+  if (str.includes('T')) {
+    const timePart = str.split('T')[1];
+    if (timePart) {
+      const match = timePart.match(/(\d{1,2}):(\d{2})/);
+      if (match) {
+        return `${match[1].padStart(2, '0')}:${match[2]}`;
+      }
+    }
+  }
+
+  // Caso 2: Formato estándar con dos puntos (ej: "09:00", "9:30", "12:16:48")
+  if (str.includes(':')) {
+    const match = str.match(/(\d{1,2}):(\d{2})/);
+    if (match) {
+      return `${match[1].padStart(2, '0')}:${match[2]}`;
+    }
+  }
+
+  // Caso 3: Solo número de hora (ej: "9" o "16")
+  if (/^\d{1,2}$/.test(str)) {
+    return `${str.padStart(2, '0')}:00`;
+  }
+
+  return str;
+};

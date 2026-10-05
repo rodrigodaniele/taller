@@ -12,7 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import { Presupuesto, Turno } from '../types';
-import { formatearFechaArgentina } from '../utils/dateFormatter';
+import { formatearFechaArgentina, formatearHorario } from '../utils/dateFormatter';
 
 interface VehicleStatusWitnessProps {
   presupuestos: Presupuesto[];
@@ -98,7 +98,7 @@ export const VehicleStatusWitness = ({
               </h3>
               <p className="text-xs text-neutral-300 mt-1 max-w-xl">
                 Tu turno está agendado para el <strong>{formatearFechaArgentina(primerTurno.fecha)}</strong> a las{' '}
-                <strong>{String(primerTurno.horario).replace("'", '')} hs</strong>. Apenas ingreses tu vehículo, Rodrigo te cargará la cotización técnica y podrás seguir cada etapa desde este testigo.
+                <strong>{formatearHorario(primerTurno.horario)} hs</strong>. Apenas ingreses tu vehículo, Rodrigo te cargará la cotización técnica y podrás seguir cada etapa desde este testigo.
               </p>
             </div>
           </div>

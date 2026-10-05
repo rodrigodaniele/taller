@@ -1,7 +1,7 @@
 import { useState, useEffect, useId } from 'react';
 import { User, Turno, HistorialServicio, Presupuesto } from '../types';
 import { gasApi } from '../services/gasApi';
-import { formatearFechaArgentina, calcularFechaVencimiento } from '../utils/dateFormatter';
+import { formatearFechaArgentina, calcularFechaVencimiento, formatearHorario } from '../utils/dateFormatter';
 import { VehicleStatusWitness } from './VehicleStatusWitness';
 import {
   Calendar,
@@ -802,7 +802,7 @@ export const ClientDashboard = ({
                               </div>
                               <div className="flex items-center gap-1.5">
                                 <Clock className="w-3.5 h-3.5 text-red-500" />
-                                <span>{String(item.horario).replace("'", '')} hs</span>
+                                <span>{formatearHorario(item.horario)} hs</span>
                               </div>
                             </div>
                           </div>

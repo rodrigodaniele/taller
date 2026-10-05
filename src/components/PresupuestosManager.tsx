@@ -40,8 +40,8 @@ interface PresupuestosManagerProps {
 
 const STORAGE_KEY = 'taller_presupuestos_v1';
 
-export { formatearFechaArgentina, calcularFechaVencimiento } from '../utils/dateFormatter';
-import { formatearFechaArgentina, calcularFechaVencimiento } from '../utils/dateFormatter';
+export { formatearFechaArgentina, calcularFechaVencimiento, formatearHorario } from '../utils/dateFormatter';
+import { formatearFechaArgentina, calcularFechaVencimiento, formatearHorario } from '../utils/dateFormatter';
 
 export const PresupuestosManager = ({
   turnosPendientes,
@@ -216,7 +216,7 @@ export const PresupuestosManager = ({
       setClienteNombre(turno.nombre || '');
       setClienteTelefono(turno.telefono || '');
       setVehiculoModelo('');
-      setSelectedTurnoRef(`${turno.patente} (${turno.fecha} ${turno.horario}hs)`);
+      setSelectedTurnoRef(`${turno.patente} (${formatearFechaArgentina(turno.fecha)} ${formatearHorario(turno.horario)}hs)`);
     } else {
       setPatente('');
       setClienteEmail('');
@@ -1276,7 +1276,7 @@ export const PresupuestosManager = ({
                       <option value="">-- Seleccionar un turno agendado de la lista --</option>
                       {turnosPendientes.map((tp, idx) => (
                         <option key={idx} value={tp.patente}>
-                          {tp.patente} — {tp.nombre ? `${tp.nombre} · ` : ''}{formatearFechaArgentina(tp.fecha)} {tp.horario}hs ({tp.telefono || tp.email})
+                          {tp.patente} — {tp.nombre ? `${tp.nombre} · ` : ''}{formatearFechaArgentina(tp.fecha)} {formatearHorario(tp.horario)} hs ({tp.telefono || tp.email})
                         </option>
                       ))}
                     </select>
