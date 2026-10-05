@@ -19,7 +19,8 @@ import {
   Phone,
   User,
   AlertCircle,
-  RefreshCw
+  RefreshCw,
+  MessageCircle
 } from 'lucide-react';
 import { Presupuesto, ItemPresupuesto, TurnoAdmin } from '../types';
 import { WORKSHOP_ITEMS, TRABAJOS_TALLER_SERVICIOS, REPUESTOS_TALLER_PIEZAS } from '../constants/workshopItems';
@@ -430,6 +431,24 @@ export const PresupuestosManager = ({
         '¡Presupuesto Facturado y Servicio Archivado!',
         `Vehículo ${p.patente} (${p.vehiculoModelo || 'Taller'}) archivado en historial clínico y se ingresaron $${p.total.toLocaleString('es-AR')} a Caja.`
       );
+    } else if (nuevoEstado === 'trabajo_terminado') {
+      onShowToast(
+        'success',
+        '¡Vehículo Listo para Retirar!',
+        `El testigo en vivo del cliente ahora marca su auto como TERMINADO. Podés tocar "Avisar Retiro" para escribirle por WhatsApp.`
+      );
+    } else if (nuevoEstado === 'en_reparacion') {
+      onShowToast(
+        'info',
+        'Auto en Reparación',
+        `El cliente ahora ve en vivo que su auto está siendo reparado en fosa/elevador.`
+      );
+    } else if (nuevoEstado === 'ingreso_taller') {
+      onShowToast(
+        'info',
+        'Auto Ingresó al Taller',
+        `El cliente ahora ve en vivo que su vehículo ya está en las instalaciones del taller.`
+      );
     } else {
       onShowToast('info', 'Estado actualizado', `${p.numero} marcado como ${nuevoEstado.toUpperCase()}.`);
     }
@@ -440,6 +459,15 @@ export const PresupuestosManager = ({
     } catch (e) {
       console.warn('Error al actualizar estado en Sheets:', e);
     }
+  };
+
+  const notificarAutoListoWhatsApp = (pres: Presupuesto) => {
+    const telLimpio = (pres.clienteTelefono || '').replace(/[^0-9]/g, '');
+    const mensaje = `Hola ${pres.clienteNombre}! 👋 Te avisamos de *La Casa de la Dirección* que tu vehículo (*${pres.patente}* - ${pres.vehiculoModelo || ''}) ya tiene el trabajo terminado y está *LISTO PARA RETIRAR* en el taller. 🚗✨\n\n📍 Te esperamos en Av. San Juan e Independencia, General Alvear.\n⏰ Horarios: Lun a Vie 08:00 a 12:30 y 15:30 a 20:00 / Sáb 08:00 a 13:00.`;
+    const url = telLimpio
+      ? `https://wa.me/549${telLimpio}?text=${encodeURIComponent(mensaje)}`
+      : `https://wa.me/?text=${encodeURIComponent(mensaje)}`;
+    window.open(url, '_blank');
   };
 
   // Delete & sync
@@ -1014,9 +1042,12 @@ export const PresupuestosManager = ({
             const estadoColors = {
               pendiente: 'bg-amber-950/60 border-amber-800/80 text-amber-400',
               aprobado: 'bg-blue-950/60 border-blue-800/80 text-blue-400',
+              ingreso_taller: 'bg-purple-950/80 border-purple-600 text-purple-300 font-bold',
+              en_reparacion: 'bg-orange-950/80 border-orange-600 text-orange-300 font-bold',
+              trabajo_terminado: 'bg-emerald-950 border-emerald-500 text-emerald-300 font-black animate-pulse shadow-md shadow-emerald-900/40',
+              facturado: 'bg-neutral-900 border-emerald-800/60 text-emerald-400',
               rechazado: 'bg-red-950/60 border-red-800/80 text-red-400',
-              facturado: 'bg-emerald-950/60 border-emerald-800/80 text-emerald-400',
-            }[p.estado];
+            }[p.estado] || 'bg-neutral-900 border-neutral-700 text-neutral-300';
 
             const fechaFormat = formatearFechaArgentina(p.fecha);
 
@@ -1047,19 +1078,34 @@ export const PresupuestosManager = ({
                     </div>
                   </div>
 
-                  {/* Estado Dropdown (Al poner Facturado, de inmediato pasa a Contabilidad) */}
-                  <div className="shrink-0 flex items-center gap-1.5">
+                  {/* Estado Dropdown & Botón de Notificación */}
+                  <div className="shrink-0 flex flex-col items-end gap-1.5">
                     <select
                       value={p.estado}
                       onChange={(e) => cambiarEstado(p.id, e.target.value as Presupuesto['estado'])}
-                      className={`text-[10px] font-heading font-black uppercase tracking-wider px-2 py-1 rounded border cursor-pointer ${estadoColors}`}
-                      title="Cambiar estado del presupuesto. Si elegís Facturado se registra en Caja automáticamente."
+                      className={`text-[10px] font-heading font-black uppercase tracking-wider px-2.5 py-1.5 rounded border cursor-pointer ${estadoColors}`}
+                      title="Cambiar estado del auto y presupuesto. Actualiza el testigo en vivo del cliente al instante."
                     >
-                      <option value="pendiente">Pendiente</option>
-                      <option value="aprobado">Aprobado</option>
-                      <option value="rechazado">Rechazado</option>
-                      <option value="facturado">Facturado (Pasa a Caja)</option>
+                      <option value="pendiente">🟡 Presupuesto Pendiente</option>
+                      <option value="aprobado">🔵 Presupuesto Aprobado</option>
+                      <option value="ingreso_taller">🟣 Auto en Taller (Ingresó)</option>
+                      <option value="en_reparacion">🟠 Auto en Reparación</option>
+                      <option value="trabajo_terminado">🟢 Trabajo Terminado (Listo para Retirar)</option>
+                      <option value="facturado">🏁 Facturado / Entregado (Pasa a Caja)</option>
+                      <option value="rechazado">⚪ Rechazado / Cancelado</option>
                     </select>
+
+                    {p.estado === 'trabajo_terminado' && (
+                      <button
+                        type="button"
+                        onClick={() => notificarAutoListoWhatsApp(p)}
+                        className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-heading font-black uppercase tracking-wider flex items-center gap-1 transition-all cursor-pointer shadow-md shadow-emerald-950 animate-bounce"
+                        title="Avisarle al cliente por WhatsApp que su auto ya está listo para retirar"
+                      >
+                        <MessageCircle className="w-3 h-3" />
+                        <span>Avisar Retiro</span>
+                      </button>
+                    )}
                   </div>
                 </div>
 

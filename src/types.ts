@@ -74,7 +74,14 @@ export interface Presupuesto {
   items: ItemPresupuesto[];
   descuentoPorcentaje?: number;
   total: number;
-  estado: 'pendiente' | 'aprobado' | 'rechazado' | 'facturado';
+  estado:
+    | 'pendiente'
+    | 'aprobado'
+    | 'ingreso_taller'
+    | 'en_reparacion'
+    | 'trabajo_terminado'
+    | 'facturado'
+    | 'rechazado';
   observaciones?: string;
   turnoRef?: string;
   createdAt: string;

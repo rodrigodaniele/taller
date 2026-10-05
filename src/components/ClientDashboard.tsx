@@ -2,6 +2,7 @@ import { useState, useEffect, useId } from 'react';
 import { User, Turno, HistorialServicio, Presupuesto } from '../types';
 import { gasApi } from '../services/gasApi';
 import { formatearFechaArgentina, calcularFechaVencimiento } from '../utils/dateFormatter';
+import { VehicleStatusWitness } from './VehicleStatusWitness';
 import {
   Calendar,
   Clock,
@@ -544,6 +545,21 @@ export const ClientDashboard = ({
           </div>
         </div>
 
+        {/* ========================================================================= */}
+        {/* TESTIGO EN VIVO DEL VEHÍCULO EN EL TALLER */}
+        {/* ========================================================================= */}
+        <VehicleStatusWitness
+          presupuestos={presupuestos}
+          turnosProgramados={turnosProgramados}
+          userNombre={user.nombre}
+          onVerPresupuesto={(p) => {
+            setActiveTab('presupuestos');
+            setPresupuestoSeleccionadoModal(p);
+          }}
+          onRefresh={loadClientPresupuestos}
+          refreshing={loadingPresupuestos}
+        />
+
         {/* Modal Booking Form */}
         {showBookingForm && (
           <div className="p-6 sm:p-8 rounded-xl bg-[#0a0a0a] border-2 border-red-600 shadow-2xl animate-in fade-in duration-200">
@@ -870,11 +886,23 @@ export const ClientDashboard = ({
                     },
                     aprobado: {
                       bg: 'bg-blue-950/60 border-blue-800/80 text-blue-400',
-                      label: '🔵 Aprobado por Vos',
+                      label: '🔵 Aprobado por Vos · Esperando Ingreso',
+                    },
+                    ingreso_taller: {
+                      bg: 'bg-purple-950/80 border-purple-600 text-purple-300 font-bold',
+                      label: '🟣 Auto Ingresó al Taller',
+                    },
+                    en_reparacion: {
+                      bg: 'bg-orange-950/80 border-orange-600 text-orange-300 font-bold',
+                      label: '🟠 Auto en Reparación (Fosa / Elevador)',
+                    },
+                    trabajo_terminado: {
+                      bg: 'bg-emerald-950 border-emerald-500 text-emerald-300 font-black animate-pulse shadow-md shadow-emerald-900/40',
+                      label: '🟢 ¡Trabajo Terminado! Listo para Retirar',
                     },
                     facturado: {
-                      bg: 'bg-emerald-950/60 border-emerald-800/80 text-emerald-400',
-                      label: '🟢 Trabajo Concluido / Facturado',
+                      bg: 'bg-neutral-900 border-neutral-700 text-emerald-400',
+                      label: '🏁 Trabajo Concluido / Facturado',
                     },
                     rechazado: {
                       bg: 'bg-neutral-900 border-neutral-700 text-neutral-400',
@@ -966,6 +994,21 @@ export const ClientDashboard = ({
                               )}
                               <span>Aprobar Presupuesto</span>
                             </button>
+                          )}
+
+                          {p.estado === 'trabajo_terminado' && (
+                            <a
+                              href={`https://wa.me/5492625532070?text=${encodeURIComponent(
+                                `Hola Rodrigo! 👋 Veo en el panel que mi auto (*${p.patente}* - ${p.vehiculoModelo || ''}) ya tiene el trabajo terminado. Te aviso que voy a pasar a retirarlo!`
+                              )}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-heading font-black text-xs uppercase tracking-wider shadow-lg shadow-emerald-500/30 transition-all cursor-pointer"
+                              title="Avisar a Rodrigo por WhatsApp que vas a retirar el auto"
+                            >
+                              <MessageCircle className="w-3.5 h-3.5" />
+                              <span>Avisar Retiro</span>
+                            </a>
                           )}
 
                           <button
@@ -1133,9 +1176,17 @@ export const ClientDashboard = ({
                   )}
                 </div>
                 <div className="text-right">
-                  <span className="text-neutral-500 block uppercase font-bold text-[10px]">Estado Actual</span>
-                  <span className="font-heading font-black text-sm uppercase text-amber-400">
-                    {presupuestoSeleccionadoModal.estado}
+                  <span className="text-neutral-500 block uppercase font-bold text-[10px]">Estado Actual en Taller</span>
+                  <span className="font-heading font-black text-xs uppercase text-amber-400 block mt-0.5">
+                    {{
+                      pendiente: '🟡 Presupuesto Pendiente de Aprobación',
+                      aprobado: '🔵 Presupuesto Aprobado (Esperando Ingreso)',
+                      ingreso_taller: '🟣 Auto en el Taller (Ingresó)',
+                      en_reparacion: '🟠 Auto en Reparación (Fosa / Elevador)',
+                      trabajo_terminado: '🟢 ¡Trabajo Terminado! Listo para Retirar',
+                      facturado: '🏁 Trabajo Concluido / Facturado',
+                      rechazado: '⚪ Rechazado / Cancelado',
+                    }[presupuestoSeleccionadoModal.estado] || presupuestoSeleccionadoModal.estado}
                   </span>
                   <span className="text-neutral-300 block mt-1 font-mono text-[11px]">
                     📅 Emisión: <strong className="text-white">{formatearFechaArgentina(presupuestoSeleccionadoModal.fecha)}</strong>
