@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+  <defs>
+    <linearGradient id="redRing" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ff3b30"/>
+      <stop offset="100%" stop-color="#cc1111"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Fondo circular oscuro de alta visibilidad -->
+  <circle cx="24" cy="24" r="23" fill="#0a0a0a" stroke="url(#redRing)" stroke-width="2.5"/>
+
+  <!-- Llave mecánica diagonal (Taller y Tren Delantero) -->
+  <path d="M33 11 C35.5 8.5 39 8.5 41 10.5 C43 12.5 43 16 40.5 18.5 L37.5 21.5 L33.5 17.5 L35 16 C35.5 15.5 35.5 14.5 35 14 C34.5 13.5 33.5 13.5 33 14 L31.5 15.5 L29 13 C29.5 12 30.5 11.2 31.5 10.8 Z" fill="#dc2626"/>
+  <path d="M28 23 L14 37 C12.5 38.5 12.5 40.5 14 42 C15.5 43.5 17.5 43.5 19 42 L33 28 Z" fill="#dc2626" opacity="0.95"/>
+  <circle cx="16.5" cy="39.5" r="1.5" fill="#0a0a0a"/>
+
+  <!-- Volante de Dirección centrado (La Casa de la Dirección) -->
+  <circle cx="24" cy="24" r="13" fill="none" stroke="#ffffff" stroke-width="3"/>
+  
+  <!-- Rayos del volante de dirección -->
+  <line x1="11" y1="24" x2="20" y2="24" stroke="#ffffff" stroke-width="2.8" stroke-linecap="round"/>
+  <line x1="28" y1="24" x2="37" y2="24" stroke="#ffffff" stroke-width="2.8" stroke-linecap="round"/>
+  <line x1="24" y1="28" x2="24" y2="37" stroke="#ffffff" stroke-width="2.8" stroke-linecap="round"/>
+
+  <!-- Centro deportivo del volante / Bocina -->
+  <circle cx="24" cy="24" r="4.5" fill="#dc2626" stroke="#ffffff" stroke-width="1.2"/>
+  <circle cx="24" cy="24" r="1.5" fill="#ffffff"/>
+  
+  <!-- Marca de alineación deportiva arriba del volante -->
+  <path d="M22 11 A 13 13 0 0 1 26 11" fill="none" stroke="#ff3b30" stroke-width="3.2" stroke-linecap="round"/>
+</svg>
