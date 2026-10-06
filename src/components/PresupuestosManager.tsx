@@ -355,10 +355,18 @@ export const PresupuestosManager = ({
       onShowToast('success', 'Presupuesto actualizado', `Guardando ${presupuestoAGuardar.numero} en Google Sheets...`);
     } else {
       const nextNum = `P-${1000 + presupuestos.length + 1}`;
+      let fechaPresupuesto = getFechaHoyArgentina();
+      if (selectedTurnoRef) {
+        const matchIso = selectedTurnoRef.match(/\b(\d{4}-\d{1,2}-\d{1,2})\b/);
+        const matchArg = selectedTurnoRef.match(/\b(\d{1,2}\/\d{1,2}\/\d{4})\b/);
+        if (matchIso) fechaPresupuesto = matchIso[1];
+        else if (matchArg) fechaPresupuesto = normalizarFechaArgentina(matchArg[1]);
+      }
+
       presupuestoAGuardar = {
         id: `pres-${Date.now()}`,
         numero: nextNum,
-        fecha: getFechaHoyArgentina(),
+        fecha: fechaPresupuesto,
         validezDias,
         clienteNombre: clienteNombre.trim() || 'Cliente Mostrador',
         clienteTelefono: clienteTelefono.trim(),

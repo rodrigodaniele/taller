@@ -1538,9 +1538,6 @@ function registrarTrabajoDesdePresupuesto(p) {
   
   var emailCliente = p.clienteEmail ? p.clienteEmail.toString().trim().toLowerCase() : (p.patente ? (p.patente.toString().trim().toLowerCase() + "@cliente.taller") : "");
   var fechaFmt = p.fecha ? p.fecha.toString().replace("'", "").trim() : getFechaHoyArgentinaAppsScript();
-  if (fechaFmt === "2026-10-06" || fechaFmt === "06/10/2026") {
-    fechaFmt = "2026-10-05";
-  }
   var horaFmt = p.horario || "";
   var patenteFmt = p.patente ? p.patente.toString().trim().toUpperCase() : "";
   var modeloFmt = p.vehiculoModelo ? p.vehiculoModelo.toString().trim() : "";
