@@ -31,7 +31,7 @@ interface PresupuestosManagerProps {
   turnosPendientes: TurnoAdmin[];
   presupuestosList?: Presupuesto[];
   onPresupuestosUpdated?: (updated: Presupuesto[]) => void;
-  onRegistrarIngresoCaja: (concepto: string, monto: number, referencia: string) => void;
+  onRegistrarIngresoCaja: (concepto: string, monto: number, referencia: string, fecha?: string) => void;
   onTurnoAtendido?: (patente: string) => void;
   onShowToast: (type: 'success' | 'error' | 'warning' | 'info', title: string, desc?: string) => void;
   initialTurnoParaPresupuestar?: TurnoAdmin | null;
@@ -40,8 +40,8 @@ interface PresupuestosManagerProps {
 
 const STORAGE_KEY = 'taller_presupuestos_v1';
 
-export { formatearFechaArgentina, calcularFechaVencimiento, formatearHorario } from '../utils/dateFormatter';
-import { formatearFechaArgentina, calcularFechaVencimiento, formatearHorario } from '../utils/dateFormatter';
+export { formatearFechaArgentina, calcularFechaVencimiento, formatearHorario, getFechaHoyArgentina, normalizarFechaArgentina } from '../utils/dateFormatter';
+import { formatearFechaArgentina, calcularFechaVencimiento, formatearHorario, getFechaHoyArgentina, normalizarFechaArgentina } from '../utils/dateFormatter';
 
 export const PresupuestosManager = ({
   turnosPendientes,
@@ -56,12 +56,13 @@ export const PresupuestosManager = ({
   // Main State
   const [presupuestos, setPresupuestos] = useState<Presupuesto[]>(() => {
     if (presupuestosList && presupuestosList.length > 0) {
-      return presupuestosList;
+      return presupuestosList.map((p) => ({ ...p, fecha: normalizarFechaArgentina(p.fecha) }));
     }
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
-        return JSON.parse(saved);
+        const list: Presupuesto[] = JSON.parse(saved);
+        return list.map((p) => ({ ...p, fecha: normalizarFechaArgentina(p.fecha) }));
       }
     } catch (e) {
       console.warn('Error loading presupuestos from localStorage:', e);
@@ -70,7 +71,7 @@ export const PresupuestosManager = ({
       {
         id: 'pres-1',
         numero: 'P-1001',
-        fecha: new Date().toISOString().split('T')[0],
+        fecha: getFechaHoyArgentina(),
         validezDias: 7,
         clienteNombre: 'Carlos Gómez',
         clienteTelefono: '2625 441122',
@@ -357,7 +358,7 @@ export const PresupuestosManager = ({
       presupuestoAGuardar = {
         id: `pres-${Date.now()}`,
         numero: nextNum,
-        fecha: new Date().toISOString().split('T')[0],
+        fecha: getFechaHoyArgentina(),
         validezDias,
         clienteNombre: clienteNombre.trim() || 'Cliente Mostrador',
         clienteTelefono: clienteTelefono.trim(),
@@ -403,7 +404,8 @@ export const PresupuestosManager = ({
     // Si cambió a facturado y no estaba facturado antes, registrar de inmediato en Contabilidad y en Detalles_Turnos
     if (nuevoEstado === 'facturado' && estadoAnterior !== 'facturado') {
       const concepto = `Facturación ${p.numero} - ${p.patente} (${p.vehiculoModelo || p.items[0]?.descripcion || 'Trabajos varios'})`;
-      onRegistrarIngresoCaja(concepto, p.total, p.patente);
+      const fechaPresupuesto = normalizarFechaArgentina(p.fecha);
+      onRegistrarIngresoCaja(concepto, p.total, p.patente, fechaPresupuesto);
 
       // 1. Guardar en almacenamiento local como turno atendido
       try {

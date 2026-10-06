@@ -1,6 +1,7 @@
 import { useState, useId } from 'react';
 import { ItemStock } from '../types';
 import { gasApi } from '../services/gasApi';
+import { getFechaHoyArgentina } from '../utils/dateFormatter';
 import { REPUESTOS_TALLER_PIEZAS } from '../constants/workshopItems';
 import {
   Package,
@@ -113,7 +114,7 @@ export const StockManager = ({
       costoUnitario: Math.max(0, parseFloat(costoUnitario) || 0),
       precioVenta: Math.max(0, parseFloat(precioVenta) || 0),
       totalInstalados: itemEnEdicion ? itemEnEdicion.totalInstalados : 0,
-      ultimoMovimiento: new Date().toISOString().split('T')[0],
+      ultimoMovimiento: getFechaHoyArgentina(),
     };
 
     try {

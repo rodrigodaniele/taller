@@ -1,4 +1,5 @@
 import { ApiResponse, DatosTrabajoAdmin, TurnoAdmin, Presupuesto, ItemStock, ItemPresupuesto } from '../types';
+import { getFechaHoyArgentina, normalizarFechaArgentina } from '../utils/dateFormatter';
 
 export const DEFAULT_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbziaELEqc9K1IKN2iXdEZ6bDN-GRUEJUUneEWfGM2VFg60uunAq_vb7gOIsxaDJEL08FA/exec";
 export const EMAIL_ADMIN_OFICIAL = "rodrigodanieleaset@gmail.com";
@@ -412,7 +413,7 @@ export const gasApi = {
         } else if (datos.costoTotal && datos.cantidad > 0) {
           item.costoUnitario = Math.round(datos.costoTotal / datos.cantidad);
         }
-        item.ultimoMovimiento = new Date().toISOString().split('T')[0];
+        item.ultimoMovimiento = getFechaHoyArgentina();
         localStorage.setItem('taller_stock_v1', JSON.stringify(list));
       }
 
@@ -420,7 +421,7 @@ export const gasApi = {
       if (datos.registrarEnContabilidad && datos.costoTotal > 0 && item) {
         const mov = {
           id: 'MOV-STOCK-' + Date.now(),
-          fecha: new Date().toISOString().split('T')[0],
+          fecha: getFechaHoyArgentina(),
           tipo: 'gasto',
           concepto: `Compra Stock: ${datos.cantidad}x ${item.nombre}`,
           categoria: 'Repuestos / Repuesteros',
@@ -481,7 +482,7 @@ export const gasApi = {
           }
           // Sumar siempre a la rotación histórica de piezas cambiadas
           stockItem.totalInstalados = (Number(stockItem.totalInstalados) || 0) + cant;
-          stockItem.ultimoMovimiento = new Date().toISOString().split('T')[0];
+          stockItem.ultimoMovimiento = getFechaHoyArgentina();
         } else {
           // Registrar automáticamente la nueva pieza en el catálogo para llevar estadística de rotación
           const nuevoItem: ItemStock = {
@@ -494,7 +495,7 @@ export const gasApi = {
             costoUnitario: 0,
             precioVenta: rep.precioUnitario || 0,
             totalInstalados: cant,
-            ultimoMovimiento: new Date().toISOString().split('T')[0],
+            ultimoMovimiento: getFechaHoyArgentina(),
           };
           list.push(nuevoItem);
         }

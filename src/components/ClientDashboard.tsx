@@ -1,7 +1,7 @@
 import { useState, useEffect, useId, useMemo } from 'react';
 import { User, Turno, HistorialServicio, Presupuesto } from '../types';
 import { gasApi } from '../services/gasApi';
-import { formatearFechaArgentina, calcularFechaVencimiento, formatearHorario } from '../utils/dateFormatter';
+import { formatearFechaArgentina, calcularFechaVencimiento, formatearHorario, normalizarFechaArgentina, getFechaHoyArgentina } from '../utils/dateFormatter';
 import { VehicleStatusWitness } from './VehicleStatusWitness';
 import {
   Calendar,
@@ -184,7 +184,7 @@ export const ClientDashboard = ({
     try {
       const res = await gasApi.getClientHistory(user.email);
       if (res.success && Array.isArray(res.historial)) {
-        setHistorialList(res.historial);
+        setHistorialList(res.historial.map((h: any) => ({ ...h, fecha: normalizarFechaArgentina(h.fecha) })));
       } else {
         setHistorialList([]);
       }
@@ -205,11 +205,13 @@ export const ClientDashboard = ({
         const userPatentes = turnos.map((t) => (t.patente || '').toUpperCase().trim());
         const userEmail = (user.email || '').toLowerCase().trim();
 
-        const filtrados = res.presupuestos.filter((p) => {
-          const emailMatch = p.clienteEmail && p.clienteEmail.toLowerCase().trim() === userEmail;
-          const patenteMatch = p.patente && userPatentes.includes(p.patente.toUpperCase().trim());
-          return emailMatch || patenteMatch;
-        });
+        const filtrados = res.presupuestos
+          .map((p) => ({ ...p, fecha: normalizarFechaArgentina(p.fecha) }))
+          .filter((p) => {
+            const emailMatch = p.clienteEmail && p.clienteEmail.toLowerCase().trim() === userEmail;
+            const patenteMatch = p.patente && userPatentes.includes(p.patente.toUpperCase().trim());
+            return emailMatch || patenteMatch;
+          });
 
         setPresupuestos(filtrados);
       } else {
@@ -569,7 +571,7 @@ export const ClientDashboard = ({
         numero: p.numero,
         patente: (p.patente || '').trim().toUpperCase(),
         modelo: p.vehiculoModelo || '',
-        fecha: p.fecha,
+        fecha: normalizarFechaArgentina(p.fecha),
         trabajo: p.items && p.items.length > 0
           ? p.items.map((it) => `${it.cantidad > 1 ? `${it.cantidad}x ` : ''}${it.descripcion}`).join(' · ')
           : (p.observaciones || 'Servicio Integral'),

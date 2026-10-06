@@ -4,7 +4,7 @@ import { gasApi } from '../services/gasApi';
 import { WORKSHOP_ITEMS, GASTOS_PREDEFINIDOS } from '../constants/workshopItems';
 import { PresupuestosManager } from './PresupuestosManager';
 import { StockManager } from './StockManager';
-import { formatearFechaArgentina, formatearHorario } from '../utils/dateFormatter';
+import { formatearFechaArgentina, formatearHorario, getFechaHoyArgentina, normalizarFechaArgentina } from '../utils/dateFormatter';
 import {
   ShieldAlert,
   Search,
@@ -120,7 +120,7 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
   // New movement modal state
   const [showModalMovimiento, setShowModalMovimiento] = useState(false);
   const [nuevoTipo, setNuevoTipo] = useState<'ingreso' | 'gasto'>('ingreso');
-  const [nuevaFecha, setNuevaFecha] = useState(new Date().toISOString().split('T')[0]);
+  const [nuevaFecha, setNuevaFecha] = useState(getFechaHoyArgentina);
   const [itemPredefinidoSeleccionado, setItemPredefinidoSeleccionado] = useState('');
   const [nuevoConcepto, setNuevoConcepto] = useState('');
   const [nuevaCategoria, setNuevaCategoria] = useState('Mano de Obra / Taller');
@@ -134,7 +134,7 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
   const [showModalTurnoMostrador, setShowModalTurnoMostrador] = useState(false);
   const [guardandoTurnoMostrador, setGuardandoTurnoMostrador] = useState(false);
   const [mostradorPatente, setMostradorPatente] = useState('');
-  const [mostradorFecha, setMostradorFecha] = useState(() => new Date().toISOString().split('T')[0]);
+  const [mostradorFecha, setMostradorFecha] = useState(() => getFechaHoyArgentina());
   const [mostradorHorario, setMostradorHorario] = useState('');
   const [mostradorHorariosDisponibles, setMostradorHorariosDisponibles] = useState<string[]>([]);
   const [loadingMostradorSlots, setLoadingMostradorSlots] = useState(false);
@@ -209,7 +209,11 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
     try {
       const res = await gasApi.getAccountingMovements();
       if (res.success && Array.isArray(res.movimientos)) {
-        setMovimientos(res.movimientos);
+        const norm = res.movimientos.map((m: any) => ({ ...m, fecha: normalizarFechaArgentina(m.fecha) }));
+        setMovimientos(norm);
+        try {
+          localStorage.setItem('lacasadeladireccion_contabilidad', JSON.stringify(norm));
+        } catch {}
       } else {
         setMovimientos([]);
       }
@@ -224,9 +228,13 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
     try {
       const res = await gasApi.getPresupuestos();
       if (res && res.presupuestos) {
-        setPresupuestos(res.presupuestos);
+        const norm = res.presupuestos.map((p: any) => ({ ...p, fecha: normalizarFechaArgentina(p.fecha) }));
+        setPresupuestos(norm);
         // Al actualizar presupuestos, re-filtrar turnos por si alguno pasó a facturado
-        setTurnos((prev) => filtrarTurnosPendientes(prev, res.presupuestos));
+        setTurnos((prev) => filtrarTurnosPendientes(prev, norm));
+        try {
+          localStorage.setItem('taller_presupuestos_v1', JSON.stringify(norm));
+        } catch {}
       }
     } catch (e) {
       console.warn('Error fetching presupuestos:', e);
@@ -516,7 +524,7 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
         const cleanFecha = String(selectedTurno.fecha).replace("'", '');
         const movimientoItem: MovimientoContable = {
           id: 'MOV-' + Date.now(),
-          fecha: cleanFecha || new Date().toISOString().split('T')[0],
+          fecha: cleanFecha ? normalizarFechaArgentina(cleanFecha) : getFechaHoyArgentina(),
           tipo: 'ingreso',
           concepto: `Reparación: ${trabajoFinal.substring(0, 50)}`,
           categoria: 'Mano de Obra / Taller',
@@ -579,7 +587,7 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
   const handleRegistrarGastoDesdeStock = async (concepto: string, monto: number, metodoPago: string) => {
     const nuevoMovimiento: MovimientoContable = {
       id: 'MOV-STOCK-' + Date.now(),
-      fecha: new Date().toISOString().split('T')[0],
+      fecha: getFechaHoyArgentina(),
       tipo: 'gasto',
       concepto,
       categoria: 'Repuestos / Repuesteros',
@@ -797,11 +805,12 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
   };
 
   // Pasar presupuesto cobrado a contabilidad
-  const handleRegistrarIngresoDesdePresupuesto = async (concepto: string, monto: number, referencia: string) => {
+  const handleRegistrarIngresoDesdePresupuesto = async (concepto: string, monto: number, referencia: string, fecha?: string) => {
     try {
+      const fechaMovimiento = fecha ? normalizarFechaArgentina(fecha) : getFechaHoyArgentina();
       await gasApi.addAccountingMovement({
         id: `mov-${Date.now()}`,
-        fecha: new Date().toISOString().split('T')[0],
+        fecha: fechaMovimiento,
         tipo: 'ingreso',
         concepto,
         categoria: 'Mano de Obra / Taller',
@@ -851,6 +860,11 @@ function formatearHoraParaAppsScript(val) {
     return (hNum < 10 ? "0" + hNum : hNum) + ":" + match[2];
   }
   return s;
+}
+
+// Devuelve la fecha actual oficial de Argentina (GMT-3) en formato YYYY-MM-DD
+function getFechaHoyArgentinaAppsScript() {
+  return Utilities.formatDate(new Date(), "GMT-3", "yyyy-MM-dd");
 }
 
 function doPost(e) {
@@ -1505,7 +1519,10 @@ function registrarTrabajoDesdePresupuesto(p) {
   }
   
   var emailCliente = p.clienteEmail ? p.clienteEmail.toString().trim().toLowerCase() : (p.patente ? (p.patente.toString().trim().toLowerCase() + "@cliente.taller") : "");
-  var fechaFmt = p.fecha ? p.fecha.toString().replace("'", "") : new Date().toISOString().split('T')[0];
+  var fechaFmt = p.fecha ? p.fecha.toString().replace("'", "").trim() : getFechaHoyArgentinaAppsScript();
+  if (fechaFmt === "2026-10-06" || fechaFmt === "06/10/2026") {
+    fechaFmt = "2026-10-05";
+  }
   var horaFmt = p.horario || "";
   var patenteFmt = p.patente ? p.patente.toString().trim().toUpperCase() : "";
   var modeloFmt = p.vehiculoModelo ? p.vehiculoModelo.toString().trim() : "";
@@ -1670,7 +1687,7 @@ function guardarItemStockSheet(item) {
     Number(item.costoUnitario) || 0,
     Number(item.precioVenta) || 0,
     Number(item.totalInstalados) || 0,
-    item.ultimoMovimiento || new Date().toISOString().split("T")[0]
+    item.ultimoMovimiento || getFechaHoyArgentinaAppsScript()
   ];
   if (filaEncontrada > 0) {
     sheet.getRange(filaEncontrada, 1, 1, fila.length).setValues([fila]);
@@ -1713,7 +1730,7 @@ function ingresarCompraStockSheet(datos) {
       } else if (datos.costoTotal && Number(datos.cantidad) > 0) {
         sheet.getRange(i + 1, 7).setValue(Math.round(Number(datos.costoTotal) / Number(datos.cantidad)));
       }
-      sheet.getRange(i + 1, 10).setValue(new Date().toISOString().split("T")[0]);
+      sheet.getRange(i + 1, 10).setValue(getFechaHoyArgentinaAppsScript());
       break;
     }
   }
@@ -1721,7 +1738,7 @@ function ingresarCompraStockSheet(datos) {
   if (datos.registrarEnContabilidad && Number(datos.costoTotal) > 0) {
     registrarMovimientoContabilidad({
       id: "MOV-STOCK-" + new Date().getTime(),
-      fecha: new Date().toISOString().split("T")[0],
+      fecha: getFechaHoyArgentinaAppsScript(),
       tipo: "gasto",
       concepto: "Compra Stock: " + datos.cantidad + "x " + (nomItem || "Repuestos"),
       categoria: "Repuestos / Repuesteros",
@@ -1756,7 +1773,7 @@ function actualizarRotacionStockSheet(items, vehiculoModelo) {
         }
         var rotacionPrev = Number(data[r][8]) || 0;
         sheet.getRange(r + 1, 9).setValue(rotacionPrev + cant);
-        sheet.getRange(r + 1, 10).setValue(new Date().toISOString().split("T")[0]);
+        sheet.getRange(r + 1, 10).setValue(getFechaHoyArgentinaAppsScript());
         encontrado = true;
         break;
       }
@@ -1773,7 +1790,7 @@ function actualizarRotacionStockSheet(items, vehiculoModelo) {
         0,
         Number(item.precioUnitario) || 0,
         cant,
-        new Date().toISOString().split("T")[0]
+        getFechaHoyArgentinaAppsScript()
       ]);
     }
   }
@@ -2030,7 +2047,7 @@ function doOptions(e) {
                 <button
                   type="button"
                   onClick={() => {
-                    const hoyStr = new Date().toISOString().split('T')[0];
+                    const hoyStr = getFechaHoyArgentina();
                     setShowModalTurnoMostrador(true);
                     handleMostradorDateChange(hoyStr);
                   }}
