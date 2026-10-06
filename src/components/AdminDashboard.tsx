@@ -1104,8 +1104,8 @@ function doPost(e) {
       if (sheetTurnos) {
         var rowsTurnos = sheetTurnos.getDataRange().getValues();
         for (var k = 1; k < rowsTurnos.length; k++) {
-          var fechaFila = String(rowsTurnos[k][1]).includes('T') ? String(rowsTurnos[k][1]).split('T')[0] : String(rowsTurnos[k][1]);
-          if (fechaFila === datos.fecha && String(rowsTurnos[k][4]).toLowerCase() !== "cancelado") {
+          var fechaFila = formatearFechaParaAppsScript(rowsTurnos[k][1]);
+          if (fechaFila === datos.fecha && String(rowsTurnos[k][4]).toLowerCase() !== "cancelado" && String(rowsTurnos[k][4]).toLowerCase() !== "atendido") {
             var horaFila = formatearHoraParaAppsScript(rowsTurnos[k][2]);
             if (horaFila) {
               ocupados.push(horaFila);
