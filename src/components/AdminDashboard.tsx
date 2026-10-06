@@ -867,6 +867,24 @@ function getFechaHoyArgentinaAppsScript() {
   return Utilities.formatDate(new Date(), "GMT-3", "yyyy-MM-dd");
 }
 
+// Formatea la fecha de forma limpia y segura (evita desfasajes de zona horaria o serialización UTC)
+function formatearFechaParaAppsScript(val) {
+  if (!val) return "";
+  if (val instanceof Date) {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var tz = (ss && ss.getSpreadsheetTimeZone()) ? ss.getSpreadsheetTimeZone() : "GMT-3";
+    return Utilities.formatDate(val, tz, "yyyy-MM-dd");
+  }
+  var s = val.toString().replace(/['"]/g, "").trim();
+  if (s.indexOf("T") !== -1) {
+    var onlyDate = s.split("T")[0];
+    if (/^\d{4}-\d{1,2}-\d{1,2}/.test(onlyDate)) {
+      return onlyDate;
+    }
+  }
+  return s;
+}
+
 function doPost(e) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -1003,7 +1021,7 @@ function doPost(e) {
         for (var j = 1; j < rowsTurnos.length; j++) {
           if (rowsTurnos[j][0].toString().toLowerCase() === datos.email.toLowerCase()) {
             listaTurnos.push({
-              "fecha": rowsTurnos[j][1],
+              "fecha": formatearFechaParaAppsScript(rowsTurnos[j][1]),
               "horario": formatearHoraParaAppsScript(rowsTurnos[j][2]),
               "patente": rowsTurnos[j][3],
               "estado": rowsTurnos[j][4] ? rowsTurnos[j][4].toString() : "Programado"
@@ -1203,7 +1221,7 @@ function obtenerMovimientosContabilidad() {
     if (row[0] || row[3]) {
       lista.push({
         id: String(row[0] || i),
-        fecha: String(row[1]).replace("'", ""),
+        fecha: formatearFechaParaAppsScript(row[1]),
         tipo: String(row[2]).toLowerCase(),
         concepto: String(row[3]),
         categoria: String(row[4] || "General"),
@@ -1358,7 +1376,7 @@ function obtenerTurnosAdmin() {
       var uInfo = mapaUsuarios[em.toLowerCase().trim()] || {};
       pendientes.push({ 
         email: em, 
-        fecha: datos[i][1], 
+        fecha: formatearFechaParaAppsScript(datos[i][1]), 
         horario: formatearHoraParaAppsScript(datos[i][2]), 
         patente: datos[i][3],
         nombre: uInfo.nombre || "",
@@ -1382,7 +1400,7 @@ function obtenerPresupuestosSheet() {
     lista.push({
       id: datos[i][0] ? datos[i][0].toString() : "",
       numero: datos[i][1] ? datos[i][1].toString() : "",
-      fecha: datos[i][2] ? datos[i][2].toString() : "",
+      fecha: formatearFechaParaAppsScript(datos[i][2]), 
       validezDias: Number(datos[i][3]) || 7,
       clienteNombre: datos[i][4] ? datos[i][4].toString() : "",
       clienteTelefono: datos[i][5] ? datos[i][5].toString() : "",
@@ -1843,7 +1861,7 @@ function obtenerHistorialCliente(emailCliente) {
       }
 
       var patFila = datos[i][3] ? datos[i][3].toString().toUpperCase().trim() : "";
-      var fechaFila = datos[i][1] ? datos[i][1].toString().replace("'", "").trim() : "";
+      var fechaFila = formatearFechaParaAppsScript(datos[i][1]);
       var montoNum = Math.round(Number(montoVal) || 0);
       var keyUnica = nroPresVal ? ("PRES_" + nroPresVal) : (patFila + "_" + fechaFila.substring(0, 10) + "_" + montoNum);
 

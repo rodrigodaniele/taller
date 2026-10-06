@@ -224,6 +224,35 @@ export const ClientDashboard = ({
     }
   };
 
+  const loadClientTurnos = async () => {
+    try {
+      const res = await gasApi.getAdminTurnos();
+      if (res && res.success && Array.isArray(res.turnos)) {
+        const userEmail = (user.email || '').toLowerCase().trim();
+        const filtrados: Turno[] = res.turnos
+          .filter((t: any) => (t.email || '').toLowerCase().trim() === userEmail)
+          .map((t: any) => ({
+            fecha: t.fecha,
+            horario: t.horario,
+            patente: t.patente,
+            estado: t.estado || 'Programado',
+          }));
+        if (filtrados.length > 0) {
+          setTurnos(filtrados);
+          try {
+            localStorage.setItem('lacasadeladireccion_turnos', JSON.stringify(filtrados));
+          } catch {}
+        }
+      }
+    } catch (e) {
+      console.warn('Error refreshing client turnos:', e);
+    }
+  };
+
+  useEffect(() => {
+    loadClientTurnos();
+  }, [user.email]);
+
   useEffect(() => {
     loadClientPresupuestos();
   }, [user.email, turnos]);
