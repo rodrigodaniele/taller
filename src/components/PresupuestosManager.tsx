@@ -449,7 +449,7 @@ export const PresupuestosManager = ({
       // 4. Actualizar radar de rotación histórica de repuestos y descontar del inventario si hay stock físico
       try {
         if (Array.isArray(p.items) && p.items.length > 0) {
-          gasApi.actualizarRotacionYDescontarStock(p.items, p.vehiculoModelo || p.patente);
+          gasApi.actualizarRotacionYDescontarStock(p.items, p.vehiculoModelo || p.patente, p.fecha);
         }
       } catch (err) {}
 

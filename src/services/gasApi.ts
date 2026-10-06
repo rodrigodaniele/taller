@@ -419,11 +419,13 @@ export const gasApi = {
     costoUnitario?: number;
     registrarEnContabilidad?: boolean;
     metodoPago?: string;
+    fecha?: string;
   }): Promise<{ success: boolean; error?: string }> {
     try {
       const saved = localStorage.getItem('taller_stock_v1');
       const list: ItemStock[] = saved ? JSON.parse(saved) : [];
       const item = list.find((x) => x.id === datos.id);
+      const fechaMov = datos.fecha ? normalizarFechaArgentina(datos.fecha) : getFechaHoyArgentina();
       if (item) {
         item.stockActual = (Number(item.stockActual) || 0) + Number(datos.cantidad);
         if (datos.costoUnitario && datos.costoUnitario > 0) {
@@ -431,7 +433,7 @@ export const gasApi = {
         } else if (datos.costoTotal && datos.cantidad > 0) {
           item.costoUnitario = Math.round(datos.costoTotal / datos.cantidad);
         }
-        item.ultimoMovimiento = getFechaHoyArgentina();
+        item.ultimoMovimiento = fechaMov;
         localStorage.setItem('taller_stock_v1', JSON.stringify(list));
       }
 
@@ -439,7 +441,7 @@ export const gasApi = {
       if (datos.registrarEnContabilidad && datos.costoTotal > 0 && item) {
         const mov = {
           id: 'MOV-STOCK-' + Date.now(),
-          fecha: getFechaHoyArgentina(),
+          fecha: fechaMov,
           tipo: 'gasto',
           concepto: `Compra Stock: ${datos.cantidad}x ${item.nombre}`,
           categoria: 'Repuestos / Repuesteros',
@@ -473,7 +475,8 @@ export const gasApi = {
 
   async actualizarRotacionYDescontarStock(
     items: ItemPresupuesto[],
-    vehiculoModelo?: string
+    vehiculoModelo?: string,
+    fechaMovimiento?: string
   ): Promise<void> {
     try {
       const repuestos = items.filter((it) => it.tipo === 'repuesto');
@@ -481,6 +484,7 @@ export const gasApi = {
 
       const saved = localStorage.getItem('taller_stock_v1');
       const list: ItemStock[] = saved ? JSON.parse(saved) : [];
+      const fechaFinal = fechaMovimiento ? normalizarFechaArgentina(fechaMovimiento) : getFechaHoyArgentina();
 
       repuestos.forEach((rep) => {
         const cant = Number(rep.cantidad) || 1;
@@ -500,7 +504,7 @@ export const gasApi = {
           }
           // Sumar siempre a la rotación histórica de piezas cambiadas
           stockItem.totalInstalados = (Number(stockItem.totalInstalados) || 0) + cant;
-          stockItem.ultimoMovimiento = getFechaHoyArgentina();
+          stockItem.ultimoMovimiento = fechaFinal;
         } else {
           // Registrar automáticamente la nueva pieza en el catálogo para llevar estadística de rotación
           const nuevoItem: ItemStock = {
@@ -513,7 +517,7 @@ export const gasApi = {
             costoUnitario: 0,
             precioVenta: rep.precioUnitario || 0,
             totalInstalados: cant,
-            ultimoMovimiento: getFechaHoyArgentina(),
+            ultimoMovimiento: fechaFinal,
           };
           list.push(nuevoItem);
         }

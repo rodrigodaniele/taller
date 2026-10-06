@@ -114,7 +114,7 @@ export const StockManager = ({
       costoUnitario: Math.max(0, parseFloat(costoUnitario) || 0),
       precioVenta: Math.max(0, parseFloat(precioVenta) || 0),
       totalInstalados: itemEnEdicion ? itemEnEdicion.totalInstalados : 0,
-      ultimoMovimiento: getFechaHoyArgentina(),
+      ultimoMovimiento: itemEnEdicion?.ultimoMovimiento || getFechaHoyArgentina(),
     };
 
     try {

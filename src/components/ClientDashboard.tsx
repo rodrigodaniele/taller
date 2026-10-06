@@ -658,16 +658,15 @@ export const ClientDashboard = ({
 
         // Si el presupuesto tiene un turno vinculado en turnoRef, la fecha real en que el auto
         // estuvo en el taller es la del turno (ej. lunes 05/10 y no el domingo previo 04/10 cuando se hizo el presupuesto)
-        let fechaReal = h.fecha;
+        let fechaReal = presupuestoMatch.fecha || h.fecha;
         const refTurno = presupuestoMatch.presupuestoOriginal?.turnoRef || '';
         if (refTurno) {
           const matchIso = refTurno.match(/\b(\d{4}-\d{1,2}-\d{1,2})\b/);
           const matchArg = refTurno.match(/\b(\d{1,2}\/\d{1,2}\/\d{4})\b/);
           if (matchIso) fechaReal = matchIso[1];
-          else if (matchArg) fechaReal = matchArg[1];
-        } else if (presupuestoMatch.fecha) {
-          fechaReal = presupuestoMatch.fecha;
+          else if (matchArg) fechaReal = normalizarFechaArgentina(matchArg[1]);
         }
+        fechaReal = normalizarFechaArgentina(fechaReal);
 
         list.push({
           ...h,
@@ -729,6 +728,7 @@ export const ClientDashboard = ({
           existente.esPresupuestoFacturado = true;
           existente.presupuestoOriginal = item.presupuestoOriginal;
           existente.numero = existente.numero || item.numero;
+          if (item.fecha) existente.fecha = item.fecha;
         }
       }
     });

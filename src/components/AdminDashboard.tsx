@@ -935,11 +935,36 @@ function getFechaHoyArgentinaAppsScript() {
 function formatearFechaParaAppsScript(val) {
   if (!val) return "";
   if (val instanceof Date) {
+    // Blindaje contra desfase de medianoche UTC -> GMT-3:
+    // Si la celda fue guardada a medianoche (00:00:00 UTC), en GMT-3 retrocede 3 horas al día anterior a las 21:00 hs.
+    // Sumando 12 horas nos aseguramos de estar al mediodía y que el día coincida exactamente en cualquier huso horario.
+    var dSafe = new Date(val.getTime() + 12 * 3600 * 1000);
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var tz = (ss && ss.getSpreadsheetTimeZone()) ? ss.getSpreadsheetTimeZone() : "GMT-3";
-    return Utilities.formatDate(val, tz, "yyyy-MM-dd");
+    return Utilities.formatDate(dSafe, tz, "yyyy-MM-dd");
   }
   var s = val.toString().replace(/['"]/g, "").trim();
+  // Caso formato Date.toString() ej: "Tue Oct 07 2026 ..."
+  var matchDateStr = s.match(/\b([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})\b/);
+  if (matchDateStr) {
+    var mesesMap = {
+      "jan": "01", "feb": "02", "mar": "03", "apr": "04", "may": "05", "jun": "06",
+      "jul": "07", "aug": "08", "sep": "09", "oct": "10", "nov": "11", "dec": "12"
+    };
+    var mNum = mesesMap[matchDateStr[1].toLowerCase()];
+    if (mNum) {
+      var dNum = matchDateStr[2].length === 1 ? ("0" + matchDateStr[2]) : matchDateStr[2];
+      return matchDateStr[3] + "-" + mNum + "-" + dNum;
+    }
+  }
+  // Caso DD/MM/AAAA
+  if (/^\d{1,2}\/\d{1,2}\/\d{4}/.test(s)) {
+    var p = s.split("/");
+    var d = p[0].length === 1 ? ("0" + p[0]) : p[0];
+    var m = p[1].length === 1 ? ("0" + p[1]) : p[1];
+    var y = p[2].split(" ")[0].split("T")[0];
+    return y + "-" + m + "-" + d;
+  }
   if (s.indexOf("T") !== -1) {
     var onlyDate = s.split("T")[0];
     if (/^\d{4}-\d{1,2}-\d{1,2}/.test(onlyDate)) {
@@ -1634,7 +1659,7 @@ function registrarTrabajoDesdePresupuesto(p) {
   }
   
   var emailCliente = p.clienteEmail ? p.clienteEmail.toString().trim().toLowerCase() : (p.patente ? (p.patente.toString().trim().toLowerCase() + "@cliente.taller") : "");
-  var fechaFmt = p.fecha ? p.fecha.toString().replace("'", "").trim() : getFechaHoyArgentinaAppsScript();
+  var fechaFmt = p.fecha ? formatearFechaParaAppsScript(p.fecha) : getFechaHoyArgentinaAppsScript();
   var horaFmt = p.horario || "";
   var patenteFmt = p.patente ? p.patente.toString().trim().toUpperCase() : "";
   var modeloFmt = p.vehiculoModelo ? p.vehiculoModelo.toString().trim() : "";
@@ -1666,10 +1691,10 @@ function registrarTrabajoDesdePresupuesto(p) {
     } catch(ePres) {}
   }
 
-  // 3. Impactar en la hoja 'Stock': sumar a rotación de repuestos y descontar si hay stock físico
+  // 3. Impactar en la hoja 'Stock': sumar a rotación de repuestos y descontar si hay stock físico (respetando la fecha del turno/presupuesto)
   if (Array.isArray(p.items) && p.items.length > 0) {
     try {
-      actualizarRotacionStockSheet(p.items, modeloFmt || patenteFmt);
+      actualizarRotacionStockSheet(p.items, modeloFmt || patenteFmt, fechaFmt);
     } catch(eStock) {}
   }
 
@@ -1713,10 +1738,11 @@ function registrarTrabajoAdmin(datosTrabajo) {
     sheetDetalles.appendRow(["Email", "Fecha", "Horario", "Patente", "Modelo", "Kilometraje", "Trabajo Realizado", "Monto Final", "NroPresupuesto"]);
   }
   
+  var fechaFmtAdmin = datosTrabajo.fecha ? formatearFechaParaAppsScript(datosTrabajo.fecha) : getFechaHoyArgentinaAppsScript();
   sheetDetalles.appendRow([
     datosTrabajo.email,
-    datosTrabajo.fecha,
-    datosTrabajo.horario,
+    "'" + fechaFmtAdmin,
+    datosTrabajo.horario ? ("'" + datosTrabajo.horario) : "",
     datosTrabajo.patente,
     datosTrabajo.modelo || "",
     datosTrabajo.kilometraje,
@@ -1733,7 +1759,7 @@ function registrarTrabajoAdmin(datosTrabajo) {
   // Actualizar rotación histórica en la hoja 'Stock'
   if (datosTrabajo && datosTrabajo.trabajoRealizado) {
     try {
-      actualizarRotacionDesdeTextoAdminSheet(datosTrabajo.trabajoRealizado, datosTrabajo.patente);
+      actualizarRotacionDesdeTextoAdminSheet(datosTrabajo.trabajoRealizado, datosTrabajo.patente, fechaFmtAdmin);
     } catch(eStockAdmin) {}
   }
 
@@ -1766,7 +1792,7 @@ function obtenerStockSheet() {
         costoUnitario: Number(r[6]) || 0,
         precioVenta: Number(r[7]) || 0,
         totalInstalados: Number(r[8]) || 0,
-        ultimoMovimiento: String(r[9] || "")
+        ultimoMovimiento: formatearFechaParaAppsScript(r[9]) || String(r[9] || "")
       });
     }
   }
@@ -1799,7 +1825,7 @@ function guardarItemStockSheet(item) {
     Number(item.costoUnitario) || 0,
     Number(item.precioVenta) || 0,
     Number(item.totalInstalados) || 0,
-    item.ultimoMovimiento || getFechaHoyArgentinaAppsScript()
+    item.ultimoMovimiento ? ("'" + formatearFechaParaAppsScript(item.ultimoMovimiento)) : ("'" + getFechaHoyArgentinaAppsScript())
   ];
   if (filaEncontrada > 0) {
     sheet.getRange(filaEncontrada, 1, 1, fila.length).setValues([fila]);
@@ -1831,6 +1857,7 @@ function ingresarCompraStockSheet(datos) {
   }
   var data = sheet.getDataRange().getValues();
   var nomItem = "";
+  var fechaCompra = datos.fecha ? formatearFechaParaAppsScript(datos.fecha) : getFechaHoyArgentinaAppsScript();
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][0]) === String(datos.id)) {
       var stockPrev = Number(data[i][4]) || 0;
@@ -1842,7 +1869,7 @@ function ingresarCompraStockSheet(datos) {
       } else if (datos.costoTotal && Number(datos.cantidad) > 0) {
         sheet.getRange(i + 1, 7).setValue(Math.round(Number(datos.costoTotal) / Number(datos.cantidad)));
       }
-      sheet.getRange(i + 1, 10).setValue(getFechaHoyArgentinaAppsScript());
+      sheet.getRange(i + 1, 10).setValue("'" + fechaCompra);
       break;
     }
   }
@@ -1850,7 +1877,7 @@ function ingresarCompraStockSheet(datos) {
   if (datos.registrarEnContabilidad && Number(datos.costoTotal) > 0) {
     registrarMovimientoContabilidad({
       id: "MOV-STOCK-" + new Date().getTime(),
-      fecha: getFechaHoyArgentinaAppsScript(),
+      fecha: fechaCompra,
       tipo: "gasto",
       concepto: "Compra Stock: " + datos.cantidad + "x " + (nomItem || "Repuestos"),
       categoria: "Repuestos / Repuesteros",
@@ -1862,13 +1889,14 @@ function ingresarCompraStockSheet(datos) {
   return { resultado: "ok", success: true };
 }
 
-function actualizarRotacionStockSheet(items, vehiculoModelo) {
+function actualizarRotacionStockSheet(items, vehiculoModelo, fechaMov) {
   if (!items || !items.length) return;
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("Stock") || ss.insertSheet("Stock");
   if (sheet.getLastRow() === 0) {
     sheet.appendRow(["ID", "Nombre", "Categoria", "VehiculoCompatibilidad", "StockActual", "StockMinimo", "CostoUnitario", "PrecioVenta", "TotalInstalados", "UltimoMovimiento"]);
   }
+  var fechaFinal = fechaMov ? formatearFechaParaAppsScript(fechaMov) : getFechaHoyArgentinaAppsScript();
   var data = sheet.getDataRange().getValues();
   for (var k = 0; k < items.length; k++) {
     var item = items[k];
@@ -1885,7 +1913,7 @@ function actualizarRotacionStockSheet(items, vehiculoModelo) {
         }
         var rotacionPrev = Number(data[r][8]) || 0;
         sheet.getRange(r + 1, 9).setValue(rotacionPrev + cant);
-        sheet.getRange(r + 1, 10).setValue(getFechaHoyArgentinaAppsScript());
+        sheet.getRange(r + 1, 10).setValue("'" + fechaFinal);
         encontrado = true;
         break;
       }
@@ -1902,13 +1930,13 @@ function actualizarRotacionStockSheet(items, vehiculoModelo) {
         0,
         Number(item.precioUnitario) || 0,
         cant,
-        getFechaHoyArgentinaAppsScript()
+        "'" + fechaFinal
       ]);
     }
   }
 }
 
-function actualizarRotacionDesdeTextoAdminSheet(textoTrabajo, patente) {
+function actualizarRotacionDesdeTextoAdminSheet(textoTrabajo, patente, fechaMov) {
   if (!textoTrabajo) return;
   var partes = String(textoTrabajo).split(" + ");
   var items = [];
@@ -1919,7 +1947,7 @@ function actualizarRotacionDesdeTextoAdminSheet(textoTrabajo, patente) {
     }
   }
   if (items.length > 0) {
-    actualizarRotacionStockSheet(items, patente);
+    actualizarRotacionStockSheet(items, patente, fechaMov);
   }
 }
 

@@ -47,13 +47,30 @@ export const normalizarFechaArgentina = (fechaRaw?: any): string => {
     return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
   }
 
-  // Caso 3: String de fecha de JavaScript (ej: Tue Oct 06 2026 00:00:00 GMT...)
+  // Caso 3: String de fecha estilo JavaScript (ej: "Tue Oct 07 2026 ..." o "Oct 07 2026")
+  const mesesIngles: Record<string, string> = {
+    jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+    jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12'
+  };
+  const matchMesTexto = str.match(/\b([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})\b/);
+  if (matchMesTexto) {
+    const mesNum = mesesIngles[matchMesTexto[1].toLowerCase()];
+    if (mesNum) {
+      const diaNum = matchMesTexto[2].padStart(2, '0');
+      const anioNum = matchMesTexto[3];
+      return `${anioNum}-${mesNum}-${diaNum}`;
+    }
+  }
+
+  // Caso 4: Parsing Date con blindaje contra desfase de medianoche
   try {
     const d = new Date(str);
     if (!isNaN(d.getTime())) {
-      const dia = String(d.getDate()).padStart(2, '0');
-      const mes = String(d.getMonth() + 1).padStart(2, '0');
-      const anio = d.getFullYear();
+      // Si la fecha original no especificaba horas o venía en UTC a medianoche, sumamos 12h
+      const safeD = str.includes('T00:00') || str.includes('Z') ? new Date(d.getTime() + 12 * 3600 * 1000) : d;
+      const dia = String(safeD.getDate()).padStart(2, '0');
+      const mes = String(safeD.getMonth() + 1).padStart(2, '0');
+      const anio = safeD.getFullYear();
       return `${anio}-${mes}-${dia}`;
     }
   } catch {}
@@ -86,13 +103,29 @@ export const formatearFechaArgentina = (fechaRaw: any): string => {
     return `${d.padStart(2, '0')}/${m.padStart(2, '0')}/${y}`;
   }
 
-  // Caso 3: String de fecha de JavaScript (ej: Tue Oct 06 2026 00:00:00 GMT...)
+  // Caso 3: String de fecha estilo JavaScript (ej: "Tue Oct 07 2026 ..." o "Oct 07 2026")
+  const mesesIngles: Record<string, string> = {
+    jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+    jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12'
+  };
+  const matchMesTexto = str.match(/\b([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})\b/);
+  if (matchMesTexto) {
+    const mesNum = mesesIngles[matchMesTexto[1].toLowerCase()];
+    if (mesNum) {
+      const diaNum = matchMesTexto[2].padStart(2, '0');
+      const anioNum = matchMesTexto[3];
+      return `${diaNum}/${mesNum}/${anioNum}`;
+    }
+  }
+
+  // Caso 4: Parsing Date con blindaje contra desfase de medianoche
   try {
     const d = new Date(str);
     if (!isNaN(d.getTime())) {
-      const dia = String(d.getDate()).padStart(2, '0');
-      const mes = String(d.getMonth() + 1).padStart(2, '0');
-      const anio = d.getFullYear();
+      const safeD = str.includes('T00:00') || str.includes('Z') ? new Date(d.getTime() + 12 * 3600 * 1000) : d;
+      const dia = String(safeD.getDate()).padStart(2, '0');
+      const mes = String(safeD.getMonth() + 1).padStart(2, '0');
+      const anio = safeD.getFullYear();
       return `${dia}/${mes}/${anio}`;
     }
   } catch {}
