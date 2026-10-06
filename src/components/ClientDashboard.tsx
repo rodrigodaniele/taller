@@ -237,12 +237,10 @@ export const ClientDashboard = ({
             patente: t.patente,
             estado: t.estado || 'Programado',
           }));
-        if (filtrados.length > 0) {
-          setTurnos(filtrados);
-          try {
-            localStorage.setItem('lacasadeladireccion_turnos', JSON.stringify(filtrados));
-          } catch {}
-        }
+        setTurnos(filtrados);
+        try {
+          localStorage.setItem('lacasadeladireccion_turnos', JSON.stringify(filtrados));
+        } catch {}
       }
     } catch (e) {
       console.warn('Error refreshing client turnos:', e);
@@ -266,14 +264,20 @@ export const ClientDashboard = ({
         bc = new BroadcastChannel('lacasadeladireccion_realtime');
         bc.onmessage = () => {
           loadClientPresupuestos(true);
+          loadClientTurnos();
         };
       } catch {}
     }
 
     // 2. Storage event para cambios de localStorage entre pestañas
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === 'taller_presupuestos_v1') {
+      if (
+        e.key === 'taller_presupuestos_v1' ||
+        e.key === 'taller_turnos_atendidos_v1' ||
+        e.key === 'taller_turnos_cancelados_v1'
+      ) {
         loadClientPresupuestos(true);
+        loadClientTurnos();
       }
     };
     window.addEventListener('storage', handleStorage);
@@ -578,6 +582,16 @@ export const ClientDashboard = ({
       const saved = localStorage.getItem('taller_turnos_atendidos_v1');
       if (saved) {
         const list: string[] = JSON.parse(saved);
+        if (list.map((x) => x.toUpperCase().trim()).includes(cleanPat)) {
+          return false;
+        }
+      }
+    } catch {}
+
+    try {
+      const cancelados = localStorage.getItem('taller_turnos_cancelados_v1');
+      if (cancelados) {
+        const list: string[] = JSON.parse(cancelados);
         if (list.map((x) => x.toUpperCase().trim()).includes(cleanPat)) {
           return false;
         }

@@ -29,7 +29,9 @@ import {
   Copy,
   Check,
   FileText,
-  Package
+  Package,
+  Ban,
+  AlertTriangle
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -40,6 +42,17 @@ interface AdminDashboardProps {
 const getTurnosAtendidosSet = (): Set<string> => {
   try {
     const saved = localStorage.getItem('taller_turnos_atendidos_v1');
+    if (saved) {
+      const list: string[] = JSON.parse(saved);
+      return new Set(list.map((p) => p.toUpperCase().trim()));
+    }
+  } catch {}
+  return new Set();
+};
+
+const getTurnosCanceladosSet = (): Set<string> => {
+  try {
+    const saved = localStorage.getItem('taller_turnos_cancelados_v1');
     if (saved) {
       const list: string[] = JSON.parse(saved);
       return new Set(list.map((p) => p.toUpperCase().trim()));
@@ -65,8 +78,26 @@ const marcarTurnoAtendidoLocal = (patente: string) => {
   } catch {}
 };
 
+const marcarTurnoCanceladoLocal = (patente: string) => {
+  try {
+    const clean = patente.toUpperCase().trim();
+    if (!clean) return;
+    const current = getTurnosCanceladosSet();
+    current.add(clean);
+    localStorage.setItem('taller_turnos_cancelados_v1', JSON.stringify(Array.from(current)));
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        const bc = new BroadcastChannel('lacasadeladireccion_realtime');
+        bc.postMessage({ type: 'TURNO_CANCELADO', patente: clean });
+        bc.close();
+      } catch {}
+    }
+  } catch {}
+};
+
 const filtrarTurnosPendientes = (listaTurnos: TurnoAdmin[], listaPresupuestos: Presupuesto[]) => {
   const atendidosSet = getTurnosAtendidosSet();
+  const canceladosSet = getTurnosCanceladosSet();
   const patentesFacturadas = new Set(
     listaPresupuestos
       .filter((p) => p.estado === 'facturado')
@@ -78,6 +109,10 @@ const filtrarTurnosPendientes = (listaTurnos: TurnoAdmin[], listaPresupuestos: P
     if (!cleanPat) return false;
     // Si ya fue marcado como atendido localmente
     if (atendidosSet.has(cleanPat)) return false;
+    // Si ya fue marcado como cancelado localmente
+    if (canceladosSet.has(cleanPat)) return false;
+    // Si el turno viene como 'cancelado' o 'atendido'
+    if (t.estado && ['atendido', 'cancelado'].includes(String(t.estado).toLowerCase().trim())) return false;
     // Si el vehículo ya tiene un presupuesto facturado (proceso finalizado y pasado a contabilidad)
     if (patentesFacturadas.has(cleanPat)) return false;
     return true;
@@ -142,6 +177,11 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
   const [mostradorTelefono, setMostradorTelefono] = useState('');
   const [mostradorEmail, setMostradorEmail] = useState('');
 
+  // Cancelar Turno por Inasistencia state
+  const [turnoACancelar, setTurnoACancelar] = useState<TurnoAdmin | null>(null);
+  const [motivoCancelacion, setMotivoCancelacion] = useState('Cliente no se presentó (inasistencia)');
+  const [cancelandoTurno, setCancelandoTurno] = useState(false);
+
   // Script copy state
   const [copiedScript, setCopiedScript] = useState(false);
 
@@ -176,9 +216,10 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
         setTurnos(pendientes);
 
         // Auto-reparación en Google Sheets: si en la planilla Turnos todavía figura como 'Programado'
-        // un vehículo que ya fue facturado o atendido, le enviamos la orden a Google Sheets para pasarlo a 'Atendido'.
+        // un vehículo que ya fue facturado, atendido o cancelado por inasistencia, enviamos la orden a Google Sheets
         try {
           const atendidosSet = getTurnosAtendidosSet();
+          const canceladosSet = getTurnosCanceladosSet();
           const patentesFacturadas = new Set(
             currentPresupuestos
               .filter((p) => p.estado === 'facturado')
@@ -186,7 +227,10 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
           );
           res.turnos.forEach((t) => {
             const cleanP = (t.patente || '').toUpperCase().trim();
-            if (cleanP && (atendidosSet.has(cleanP) || patentesFacturadas.has(cleanP))) {
+            if (!cleanP) return;
+            if (canceladosSet.has(cleanP)) {
+              gasApi.cancelarTurno(cleanP).catch(() => {});
+            } else if (atendidosSet.has(cleanP) || patentesFacturadas.has(cleanP)) {
               gasApi.marcarTurnoAtendido(cleanP).catch(() => {});
             }
           });
@@ -281,7 +325,7 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
         fetchTurnos(true);
       }
       if (e.key === 'lacasadeladireccion_contabilidad') fetchContabilidad(true);
-      if (e.key === 'taller_turnos_atendidos_v1') fetchTurnos(true);
+      if (e.key === 'taller_turnos_atendidos_v1' || e.key === 'taller_turnos_cancelados_v1') fetchTurnos(true);
       if (e.key === 'taller_stock_v1') fetchStock(true);
     };
     window.addEventListener('storage', handleStorage);
@@ -581,6 +625,26 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
     marcarTurnoAtendidoLocal(cleanPat);
     setTurnos((prev) => prev.filter((t) => (t.patente || '').trim().toUpperCase() !== cleanPat));
     gasApi.marcarTurnoAtendido(cleanPat).catch(() => {});
+  };
+
+  // Cancelar turno por inasistencia del usuario antes de programar
+  const handleConfirmarCancelarTurno = async () => {
+    if (!turnoACancelar) return;
+    const pat = (turnoACancelar.patente || '').trim().toUpperCase();
+    setCancelandoTurno(true);
+    try {
+      marcarTurnoCanceladoLocal(pat);
+      setTurnos((prev) => prev.filter((t) => (t.patente || '').trim().toUpperCase() !== pat));
+      await gasApi.cancelarTurno(pat, motivoCancelacion);
+      onShowToast('info', 'Turno cancelado', `El turno de la patente ${pat} fue cancelado exitosamente.`);
+      setTurnoACancelar(null);
+    } catch (err: any) {
+      console.error(err);
+      onShowToast('error', 'Error al cancelar', 'No se pudo comunicar con Google Sheets, pero se canceló en pantalla.');
+      setTurnoACancelar(null);
+    } finally {
+      setCancelandoTurno(false);
+    }
   };
 
   // Registrar gasto en Contabilidad cuando se compre stock de repuestos
@@ -1187,6 +1251,12 @@ function doPost(e) {
       var resAtendido = pasarTurnoAAtendidoPorPatente(datos.patente);
       return ContentService.createTextOutput(JSON.stringify(resAtendido)).setMimeType(ContentService.MimeType.JSON);
     }
+
+    // --- ACCIÓN 22: CANCELAR TURNO POR INASISTENCIA DEL USUARIO ---
+    if (datos.accion === "cancelarTurno") {
+      var resCancelado = pasarTurnoACanceladoPorPatente(datos.patente, datos.motivo);
+      return ContentService.createTextOutput(JSON.stringify(resCancelado)).setMimeType(ContentService.MimeType.JSON);
+    }
                            
   } catch(error) {
     return ContentService.createTextOutput(JSON.stringify({"resultado": "error", "mensaje": error.toString()})).setMimeType(ContentService.MimeType.JSON);
@@ -1339,6 +1409,33 @@ function pasarTurnoAAtendidoPorPatente(patente) {
     var estFila = data[i][4] ? data[i][4].toString().trim().toLowerCase() : "";
     if (patFila === target && estFila !== "atendido" && estFila !== "cancelado") {
       sheetTurnos.getRange(i + 1, 5).setValue("Atendido");
+      actualizados++;
+    }
+  }
+  
+  ejecutarLimpiezaYOrdenamientoCompleto();
+  return { success: true, actualizados: actualizados };
+}
+
+function pasarTurnoACanceladoPorPatente(patente, motivo) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetTurnos = ss.getSheetByName("Turnos");
+  if (!sheetTurnos) return { success: false, error: "No se encontró hoja Turnos" };
+  
+  var target = limpiarPatenteParaComparacion(patente);
+  if (!target) return { success: false, error: "Patente vacía" };
+  
+  var lastRow = sheetTurnos.getLastRow();
+  if (lastRow <= 1) return { success: true, actualizados: 0 };
+  
+  var data = sheetTurnos.getDataRange().getValues();
+  var actualizados = 0;
+  
+  for (var i = 1; i < data.length; i++) {
+    var patFila = limpiarPatenteParaComparacion(data[i][3]);
+    var estFila = data[i][4] ? data[i][4].toString().trim().toLowerCase() : "";
+    if (patFila === target && estFila !== "atendido" && estFila !== "cancelado") {
+      sheetTurnos.getRange(i + 1, 5).setValue("Cancelado");
       actualizados++;
     }
   }
@@ -2146,17 +2243,32 @@ function doOptions(e) {
                                 <span>Presupuesto {presupuestoExistente.numero} (${presupuestoExistente.total.toLocaleString('es-AR')})</span>
                               </button>
                             ) : (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setTurnoParaPresupuesto(turno);
-                                  setActiveAdminTab('presupuestos');
-                                }}
-                                className="px-4 py-2.5 rounded-lg bg-red-600 hover:bg-red-700 active:scale-95 text-white text-xs font-heading font-black uppercase tracking-wider flex items-center gap-2 transition-all shadow-md shadow-red-950 cursor-pointer"
-                              >
-                                <FileText className="w-4 h-4" />
-                                <span>+ Crear Presupuesto / Cotización</span>
-                              </button>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setMotivoCancelacion('Cliente no se presentó (inasistencia)');
+                                    setTurnoACancelar(turno);
+                                  }}
+                                  className="px-3 py-2.5 rounded-lg bg-neutral-900/90 hover:bg-red-950/80 border border-neutral-700/80 hover:border-red-600 text-neutral-300 hover:text-red-200 text-xs font-heading font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all shadow-sm cursor-pointer active:scale-95"
+                                  title="Cancelar turno en caso de que no vaya el usuario (antes de programar)"
+                                >
+                                  <Ban className="w-3.5 h-3.5 text-red-500" />
+                                  <span>Cancelar Turno</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setTurnoParaPresupuesto(turno);
+                                    setActiveAdminTab('presupuestos');
+                                  }}
+                                  className="px-4 py-2.5 rounded-lg bg-red-600 hover:bg-red-700 active:scale-95 text-white text-xs font-heading font-black uppercase tracking-wider flex items-center gap-2 transition-all shadow-md shadow-red-950 cursor-pointer"
+                                >
+                                  <FileText className="w-4 h-4" />
+                                  <span>+ Crear Presupuesto / Cotización</span>
+                                </button>
+                              </div>
                             )}
                           </div>
                         </div>
@@ -2984,6 +3096,130 @@ function doOptions(e) {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL CANCELAR TURNO POR INASISTENCIA (ANTES DE PROGRAMAR) */}
+        {turnoACancelar && (
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-[#111111] border border-neutral-800 rounded-2xl p-6 max-w-md w-full shadow-2xl relative space-y-5 animate-in fade-in zoom-in-95 duration-150">
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-red-950/70 border border-red-800/70 text-red-400">
+                    <Ban className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="font-heading font-black text-white text-base uppercase tracking-wider">
+                      Cancelar Turno
+                    </h3>
+                    <p className="text-xs text-neutral-400">
+                      Inasistencia del usuario antes de programar
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => !cancelandoTurno && setTurnoACancelar(null)}
+                  className="text-neutral-500 hover:text-white p-1 rounded-lg hover:bg-neutral-800 transition-colors cursor-pointer"
+                  disabled={cancelandoTurno}
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Resumen del turno a cancelar */}
+              <div className="p-4 rounded-xl bg-neutral-900/80 border border-neutral-800 space-y-2 text-xs">
+                <div className="flex items-center justify-between pb-2 border-b border-neutral-800">
+                  <span className="text-neutral-400">Vehículo:</span>
+                  <span className="font-mono font-bold text-white uppercase text-sm bg-neutral-800 px-2 py-0.5 rounded border border-neutral-700">
+                    {turnoACancelar.patente}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-neutral-400">Fecha reservada:</span>
+                  <span className="font-mono text-white font-semibold">
+                    {formatearFechaArgentina(turnoACancelar.fecha)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-neutral-400">Horario:</span>
+                  <span className="text-white font-semibold">
+                    {formatearHorario(turnoACancelar.horario)} hs
+                  </span>
+                </div>
+                {turnoACancelar.email && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-neutral-400">Correo:</span>
+                    <span className="text-neutral-300 truncate max-w-[200px]">
+                      {turnoACancelar.email}
+                    </span>
+                  </div>
+                )}
+                {turnoACancelar.nombre && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-neutral-400">Cliente:</span>
+                    <span className="text-white font-semibold">
+                      {turnoACancelar.nombre}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Motivo de la cancelación */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-heading font-bold text-neutral-300 uppercase tracking-wider">
+                  Motivo de cancelación:
+                </label>
+                <select
+                  value={motivoCancelacion}
+                  onChange={(e) => setMotivoCancelacion(e.target.value)}
+                  disabled={cancelandoTurno}
+                  className="w-full bg-neutral-900 border border-neutral-800 focus:border-red-600 focus:outline-none rounded-xl px-3 py-2.5 text-xs text-white"
+                >
+                  <option value="Cliente no se presentó (inasistencia)">Cliente no se presentó (inasistencia)</option>
+                  <option value="Cancelado con previo aviso del cliente">Cancelado con previo aviso del cliente</option>
+                  <option value="Turno duplicado o error de carga">Turno duplicado o error de carga</option>
+                  <option value="Reprogramación acordada">Reprogramación acordada</option>
+                  <option value="Otro motivo">Otro motivo</option>
+                </select>
+              </div>
+
+              <div className="p-3 rounded-xl bg-amber-950/20 border border-amber-900/40 text-[11px] text-amber-300/90 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <span>
+                  El turno pasará al estado <strong>Cancelado</strong> en Google Sheets y se liberará inmediatamente de la lista de turnos pendientes del taller.
+                </span>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2 border-t border-neutral-800/80">
+                <button
+                  type="button"
+                  onClick={() => setTurnoACancelar(null)}
+                  disabled={cancelandoTurno}
+                  className="px-4 py-2.5 rounded-xl border border-neutral-700 hover:border-neutral-600 text-neutral-300 hover:text-white text-xs font-heading font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                >
+                  Volver
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmarCancelarTurno}
+                  disabled={cancelandoTurno}
+                  className="px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 active:scale-95 text-white text-xs font-heading font-black uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-red-950 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {cancelandoTurno ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Cancelando Turno...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Ban className="w-4 h-4" />
+                      <span>Confirmar Cancelación</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         )}

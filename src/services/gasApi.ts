@@ -126,6 +126,24 @@ export const gasApi = {
     }
   },
 
+  async cancelarTurno(patente: string, motivo?: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await callGasApi({
+        accion: 'cancelarTurno',
+        patente: patente.trim().toUpperCase(),
+        motivo: motivo || 'Cliente no asistió',
+      });
+      // Fallback si la versión instalada en Apps Script aún no tiene la acción 'cancelarTurno'
+      if (res && (res as any).resultado === 'error') {
+        return await this.marcarTurnoAtendido(patente);
+      }
+      return res;
+    } catch (e: any) {
+      console.warn('Aviso: Cancelado localmente el turno:', e);
+      return { success: true };
+    }
+  },
+
   async getClientHistory(emailCliente: string): Promise<{ success: boolean; historial: any[]; error?: string }> {
     return callGasApi({
       accion: 'obtenerHistorialCliente',

@@ -28,6 +28,7 @@ export interface TurnoAdmin {
   patente: string;
   nombre?: string;
   telefono?: string;
+  estado?: string;
 }
 
 export interface DatosTrabajoAdmin {
