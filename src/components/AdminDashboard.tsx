@@ -2203,74 +2203,83 @@ function doOptions(e) {
                     return (
                       <div
                         key={idx}
-                        className="p-5 rounded-xl bg-[#0a0a0a] border border-neutral-800 border-l-4 border-l-red-600 hover:border-neutral-700 transition-all shadow-lg flex flex-col justify-between gap-4"
+                        className="p-5 rounded-xl bg-[#0a0a0a] border border-neutral-800 border-l-4 border-l-red-600 hover:border-neutral-700 transition-all shadow-lg flex flex-col justify-between gap-4 overflow-hidden"
                       >
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                          <div>
+                        {/* Datos del Turno */}
+                        <div>
+                          <div className="flex items-center justify-between gap-2">
                             <div className="flex items-center gap-2">
-                              <Car className="w-4 h-4 text-red-500" />
+                              <Car className="w-4 h-4 text-red-500 shrink-0" />
                               <span className="font-mono text-lg font-black text-white uppercase tracking-wider">
                                 {turno.patente}
                               </span>
                             </div>
-                            <div className="mt-2 text-xs text-neutral-400 space-y-1">
-                              <div className="flex items-center gap-1.5">
-                                <Calendar className="w-3.5 h-3.5 text-red-500" />
-                                <span className="font-mono text-white font-bold">{formatearFechaArgentina(turno.fecha)}</span>
-                              </div>
-                              <div className="flex items-center gap-1.5">
-                                <Clock className="w-3.5 h-3.5 text-neutral-500" />
-                                <span className="text-white font-semibold">
-                                  {formatearHorario(turno.horario)} hs
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-1.5">
-                                <Mail className="w-3.5 h-3.5 text-neutral-500" />
-                                <span className="truncate max-w-[200px]">{turno.email}</span>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="shrink-0 flex items-center gap-2 pt-2 sm:pt-0">
-                            {presupuestoExistente ? (
-                              <button
-                                type="button"
-                                onClick={() => setActiveAdminTab('presupuestos')}
-                                className="px-4 py-2.5 rounded-lg bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-600/80 text-emerald-300 text-xs font-heading font-bold uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer shadow-md"
-                                title={`Ver presupuesto ${presupuestoExistente.numero} ($${presupuestoExistente.total.toLocaleString('es-AR')})`}
-                              >
-                                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                                <span>Presupuesto {presupuestoExistente.numero} (${presupuestoExistente.total.toLocaleString('es-AR')})</span>
-                              </button>
-                            ) : (
-                              <div className="flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setMotivoCancelacion('Cliente no se presentó (inasistencia)');
-                                    setTurnoACancelar(turno);
-                                  }}
-                                  className="px-3 py-2.5 rounded-lg bg-neutral-900/90 hover:bg-red-950/80 border border-neutral-700/80 hover:border-red-600 text-neutral-300 hover:text-red-200 text-xs font-heading font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all shadow-sm cursor-pointer active:scale-95"
-                                  title="Cancelar turno en caso de que no vaya el usuario (antes de programar)"
-                                >
-                                  <Ban className="w-3.5 h-3.5 text-red-500" />
-                                  <span>Cancelar Turno</span>
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setTurnoParaPresupuesto(turno);
-                                    setActiveAdminTab('presupuestos');
-                                  }}
-                                  className="px-4 py-2.5 rounded-lg bg-red-600 hover:bg-red-700 active:scale-95 text-white text-xs font-heading font-black uppercase tracking-wider flex items-center gap-2 transition-all shadow-md shadow-red-950 cursor-pointer"
-                                >
-                                  <FileText className="w-4 h-4" />
-                                  <span>+ Crear Presupuesto / Cotización</span>
-                                </button>
-                              </div>
+                            {turno.nombre && (
+                              <span className="text-xs text-neutral-400 font-medium truncate max-w-[150px]">
+                                {turno.nombre}
+                              </span>
                             )}
                           </div>
+
+                          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-neutral-400">
+                            <div className="flex items-center gap-1.5">
+                              <Calendar className="w-3.5 h-3.5 text-red-500 shrink-0" />
+                              <span className="font-mono text-white font-bold">{formatearFechaArgentina(turno.fecha)}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <Clock className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
+                              <span className="text-white font-semibold">
+                                {formatearHorario(turno.horario)} hs
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5 col-span-1 sm:col-span-2">
+                              <Mail className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
+                              <span className="truncate text-neutral-300">{turno.email}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Botones de Acción */}
+                        <div className="pt-3 border-t border-neutral-800/80 w-full">
+                          {presupuestoExistente ? (
+                            <button
+                              type="button"
+                              onClick={() => setActiveAdminTab('presupuestos')}
+                              className="w-full px-4 py-2.5 rounded-lg bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-600/80 text-emerald-300 text-xs font-heading font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
+                              title={`Ver presupuesto ${presupuestoExistente.numero} ($${presupuestoExistente.total.toLocaleString('es-AR')})`}
+                            >
+                              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                              <span className="truncate">Presupuesto {presupuestoExistente.numero} (${presupuestoExistente.total.toLocaleString('es-AR')})</span>
+                            </button>
+                          ) : (
+                            <div className="flex items-center gap-2 w-full">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setMotivoCancelacion('Cliente no se presentó (inasistencia)');
+                                  setTurnoACancelar(turno);
+                                }}
+                                className="shrink-0 px-3 py-2.5 rounded-lg bg-neutral-900 hover:bg-red-950/80 border border-neutral-700 hover:border-red-600 text-neutral-300 hover:text-red-200 text-xs font-heading font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all shadow-sm cursor-pointer active:scale-95"
+                                title="Cancelar turno si el usuario no asistió (antes de programar)"
+                              >
+                                <Ban className="w-3.5 h-3.5 text-red-500 shrink-0" />
+                                <span>Cancelar</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setTurnoParaPresupuesto(turno);
+                                  setActiveAdminTab('presupuestos');
+                                }}
+                                className="flex-1 min-w-0 px-3 py-2.5 rounded-lg bg-red-600 hover:bg-red-700 active:scale-95 text-white text-xs font-heading font-black uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all shadow-md shadow-red-950 cursor-pointer"
+                                title="Crear Presupuesto / Cotización"
+                              >
+                                <FileText className="w-4 h-4 shrink-0" />
+                                <span className="truncate">+ Presupuestar</span>
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
