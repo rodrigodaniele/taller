@@ -611,55 +611,100 @@ export const ClientDashboard = ({
       }));
   }, [presupuestos]);
 
-  // Historial combinado sin duplicados (ni entre sí ni con presupuestos facturados)
+  // Historial combinado sin duplicados (sincroniza registro de Google Sheets con presupuesto facturado)
   const listaHistorialCompleta = useMemo(() => {
     const list: any[] = [];
+    const facturadosAsociados = new Set<string>();
 
-    const sonElMismoServicio = (a: any, b: any): boolean => {
-      const patA = String(a.patente || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-      const patB = String(b.patente || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-      if (!patA || !patB || patA !== patB) return false;
+    const cleanPat = (p: any) => String(p || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
 
-      const fechaA = formatearFechaArgentina(a.fecha);
-      const fechaB = formatearFechaArgentina(b.fecha);
-      if (!fechaA || !fechaB || fechaA !== fechaB) return false;
+    // 1. Comenzamos con los registros reales de Google Sheets (Detalles_Turnos)
+    historialList.forEach((h: any) => {
+      const patH = cleanPat(h.patente);
+      const numH = (h.numero || h.nroPresupuesto || '').trim().toUpperCase();
+      const montoH = Math.round(Number(String(h.monto || '').replace(/[^0-9]/g, '')) || 0);
 
-      // Si coinciden patente y fecha, es el mismo vehículo en la misma fecha
-      const numA = (a.numero || a.nroPresupuesto || '').trim().toUpperCase();
-      const numB = (b.numero || b.nroPresupuesto || '').trim().toUpperCase();
-      if (numA && numB && numA === numB) return true;
+      // Buscar si corresponde a un presupuesto facturado para adjuntar PDF y comprobante oficial
+      const presupuestoMatch = facturadosComoHistorial.find((f: any) => {
+        const patF = cleanPat(f.patente);
+        if (!patH || !patF || patH !== patF) return false;
 
-      // Comparar monto eliminando cualquier carácter no numérico (símbolos, puntos, comas)
-      const montoA = Math.round(Number(String(a.monto || '').replace(/[^0-9]/g, '')) || 0);
-      const montoB = Math.round(Number(String(b.monto || '').replace(/[^0-9]/g, '')) || 0);
-      if (montoA > 0 && montoB > 0 && Math.abs(montoA - montoB) < 100) return true;
+        const numF = (f.numero || f.id || '').trim().toUpperCase();
+        if (numH && numF && (numH === numF || numH.includes(numF) || numF.includes(numH))) return true;
 
-      // Comparar trabajo principal
-      const trabA = String(a.trabajo || '').toLowerCase().trim();
-      const trabB = String(b.trabajo || '').toLowerCase().trim();
-      if (trabA && trabB && (trabA.includes(trabB) || trabB.includes(trabA))) return true;
+        const montoF = Math.round(Number(String(f.monto || '').replace(/[^0-9]/g, '')) || 0);
+        if (montoH > 0 && montoF > 0 && Math.abs(montoH - montoF) < 100) return true;
 
-      // Misma patente y misma fecha en el taller es el mismo servicio
-      return true;
-    };
+        // Misma patente del mismo cliente
+        return true;
+      });
 
-    // 1. Agregar primero los presupuestos facturados (contienen el comprobante oficial y botón PDF)
-    facturadosComoHistorial.forEach((fact) => {
-      const yaExiste = list.some((item) => sonElMismoServicio(item, fact));
-      if (!yaExiste) {
-        list.push(fact);
-      }
-    });
-
-    // 2. Agregar los registros históricos de Google Sheets que no hayan sido ya incluidos
-    historialList.forEach((h) => {
-      const yaExiste = list.some((item) => sonElMismoServicio(item, h));
-      if (!yaExiste) {
+      if (presupuestoMatch) {
+        facturadosAsociados.add(presupuestoMatch.id);
+        list.push({
+          ...h,
+          modelo: h.modelo || presupuestoMatch.modelo,
+          esPresupuestoFacturado: true,
+          presupuestoOriginal: presupuestoMatch.presupuestoOriginal,
+          numero: h.numero || presupuestoMatch.numero,
+        });
+      } else {
         list.push(h);
       }
     });
 
-    return list;
+    // 2. Si hay algún presupuesto facturado que aún no figure en Detalles_Turnos (ej. recién facturado localmente)
+    facturadosComoHistorial.forEach((fact: any) => {
+      if (!facturadosAsociados.has(fact.id)) {
+        const patF = cleanPat(fact.patente);
+        const yaEstaEnLista = list.some((item: any) => {
+          const patItem = cleanPat(item.patente);
+          if (patItem !== patF) return false;
+          const numItem = (item.numero || item.nroPresupuesto || '').trim().toUpperCase();
+          const numFact = (fact.numero || fact.id || '').trim().toUpperCase();
+          if (numItem && numFact && (numItem === numFact || numItem.includes(numFact) || numFact.includes(numItem))) return true;
+          return true; // Misma patente
+        });
+
+        if (!yaEstaEnLista) {
+          list.push(fact);
+        }
+      }
+    });
+
+    // 3. Deduplicación final de seguridad estricta para garantizar exactamente 1 registro por reparación
+    const deduped: any[] = [];
+    list.forEach((item) => {
+      const patItem = cleanPat(item.patente);
+      const yaExiste = deduped.some((d) => {
+        const patD = cleanPat(d.patente);
+        if (patD !== patItem) return false;
+        const numD = (d.numero || d.nroPresupuesto || '').trim().toUpperCase();
+        const numI = (item.numero || item.nroPresupuesto || '').trim().toUpperCase();
+        if (numD && numI && (numD === numI || numD.includes(numI) || numI.includes(numD))) return true;
+        const fechaD = formatearFechaArgentina(d.fecha);
+        const fechaI = formatearFechaArgentina(item.fecha);
+        if (fechaD === fechaI) return true;
+        const mD = Math.round(Number(String(d.monto || '').replace(/[^0-9]/g, '')) || 0);
+        const mI = Math.round(Number(String(item.monto || '').replace(/[^0-9]/g, '')) || 0);
+        if (mD > 0 && mI > 0 && Math.abs(mD - mI) < 100) return true;
+        return true;
+      });
+
+      if (!yaExiste) {
+        deduped.push(item);
+      } else {
+        // Si el elemento duplicado tiene el comprobante oficial y el existente no, enriquecer el existente
+        const existente = deduped.find((d) => cleanPat(d.patente) === patItem);
+        if (existente && !existente.esPresupuestoFacturado && item.esPresupuestoFacturado) {
+          existente.esPresupuestoFacturado = true;
+          existente.presupuestoOriginal = item.presupuestoOriginal;
+          existente.numero = existente.numero || item.numero;
+        }
+      }
+    });
+
+    return deduped;
   }, [historialList, facturadosComoHistorial]);
 
   return (
