@@ -74,6 +74,16 @@ export default function App() {
     try {
       localStorage.setItem('lacasadeladireccion_user', JSON.stringify(newUser));
       localStorage.setItem('lacasadeladireccion_turnos', JSON.stringify(userTurnos));
+      const cleanEmail = (newUser.email || '').trim().toLowerCase();
+      if (cleanEmail) {
+        const savedDir = localStorage.getItem('taller_directorio_clientes_v1');
+        const listDir = savedDir ? JSON.parse(savedDir) : [];
+        const nextDir = [
+          ...listDir.filter((c: any) => (c.email || '').toLowerCase().trim() !== cleanEmail),
+          { email: cleanEmail, nombre: newUser.nombre, telefono: newUser.telefono }
+        ];
+        localStorage.setItem('taller_directorio_clientes_v1', JSON.stringify(nextDir));
+      }
     } catch (e) {
       console.error(e);
     }

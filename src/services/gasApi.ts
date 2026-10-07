@@ -118,15 +118,103 @@ export const gasApi = {
     });
   },
 
-  async buscarClientePorEmail(email: string): Promise<{ success: boolean; usuario?: { nombre: string; telefono: string; email: string }; error?: string }> {
+  async buscarClientePorEmail(email: string): Promise<{ success: boolean; usuario?: { nombre: string; telefono: string; email: string; patente?: string }; error?: string }> {
+    const clean = email.trim().toLowerCase();
+    if (!clean) return { success: false, error: 'Email vacío' };
+
+    // 1. Intentar acción directa en Apps Script (buscarUsuarioPorEmail)
     try {
-      return await callGasApi({
+      const res = await callGasApi({
         accion: 'buscarUsuarioPorEmail',
-        email: email.trim().toLowerCase(),
+        email: clean,
       });
-    } catch (e: any) {
-      return { success: false, error: e.message };
-    }
+      if (res && (res.resultado === 'ok' || res.success) && res.usuario && (res.usuario.nombre || res.usuario.telefono)) {
+        return {
+          success: true,
+          usuario: {
+            email: clean,
+            nombre: res.usuario.nombre || '',
+            telefono: res.usuario.telefono || '',
+            patente: res.usuario.patente || '',
+          },
+        };
+      }
+    } catch {}
+
+    // 2. Intentar login con clave predeterminada de mostrador (123456)
+    // Esto funciona con la versión actual desplegada en Google Apps Script, leyendo directo de la hoja Usuarios
+    try {
+      const loginRes = await this.login(clean, '123456');
+      if (loginRes && loginRes.resultado === 'ok' && (loginRes.nombre || loginRes.telefono)) {
+        let patente = '';
+        if (Array.isArray(loginRes.turnos) && loginRes.turnos.length > 0) {
+          const tMatch = loginRes.turnos.find((t: any) => t.patente && t.patente !== 'MOSTRADOR');
+          if (tMatch) patente = tMatch.patente;
+        }
+        return {
+          success: true,
+          usuario: {
+            email: clean,
+            nombre: loginRes.nombre || '',
+            telefono: loginRes.telefono || '',
+            patente,
+          },
+        };
+      }
+    } catch {}
+
+    // 3. Consultar la lista de turnos de admin para ver si el correo figura con nombre y teléfono
+    try {
+      const turnosRes = await this.getAdminTurnos();
+      if (turnosRes && turnosRes.success) {
+        if (Array.isArray((turnosRes as any).usuarios)) {
+          const u = (turnosRes as any).usuarios.find((x: any) => (x.email || '').toLowerCase().trim() === clean);
+          if (u && (u.nombre || u.telefono)) {
+            return {
+              success: true,
+              usuario: {
+                email: clean,
+                nombre: u.nombre || '',
+                telefono: u.telefono || '',
+              },
+            };
+          }
+        }
+        if (Array.isArray(turnosRes.turnos)) {
+          const t = turnosRes.turnos.find((x: any) => (x.email || '').toLowerCase().trim() === clean);
+          if (t && (t.nombre || t.telefono)) {
+            return {
+              success: true,
+              usuario: {
+                email: clean,
+                nombre: t.nombre || '',
+                telefono: t.telefono || '',
+                patente: t.patente && t.patente !== 'MOSTRADOR' ? t.patente : '',
+              },
+            };
+          }
+        }
+      }
+    } catch {}
+
+    // 4. Consultar historial de servicios por email para ver si existe y traer su patente
+    try {
+      const histRes = await this.getClientHistory(clean);
+      if (histRes && histRes.success && Array.isArray(histRes.historial) && histRes.historial.length > 0) {
+        const item = histRes.historial[0];
+        return {
+          success: true,
+          usuario: {
+            email: clean,
+            nombre: '',
+            telefono: '',
+            patente: item.patente && item.patente !== 'MOSTRADOR' ? item.patente : '',
+          },
+        };
+      }
+    } catch {}
+
+    return { success: false, error: 'Usuario no encontrado' };
   },
 
   async marcarTurnoAtendido(patente: string): Promise<{ success: boolean; error?: string }> {

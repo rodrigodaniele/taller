@@ -10,6 +10,24 @@ interface AuthModalProps {
   onShowToast: (type: 'success' | 'error' | 'warning' | 'info', title: string, desc?: string) => void;
 }
 
+function guardarEnDirectorioClientes(email: string, nombre: string, telefono: string) {
+  try {
+    const cleanEmail = (email || '').trim().toLowerCase();
+    if (!cleanEmail) return;
+    const saved = localStorage.getItem('taller_directorio_clientes_v1');
+    const list: any[] = saved ? JSON.parse(saved) : [];
+    const prev = list.find((c: any) => (c.email || '').toLowerCase().trim() === cleanEmail) || {};
+    const updated = {
+      email: cleanEmail,
+      nombre: nombre || prev.nombre || '',
+      telefono: telefono || prev.telefono || '',
+      patente: prev.patente || '',
+    };
+    const next = [...list.filter((c: any) => (c.email || '').toLowerCase().trim() !== cleanEmail), updated];
+    localStorage.setItem('taller_directorio_clientes_v1', JSON.stringify(next));
+  } catch {}
+}
+
 export const AuthModal = ({ isOpen, onClose, onLoginSuccess, onShowToast }: AuthModalProps) => {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [loading, setLoading] = useState(false);
@@ -64,6 +82,7 @@ export const AuthModal = ({ isOpen, onClose, onLoginSuccess, onShowToast }: Auth
     try {
       const res = await gasApi.login(loginEmail, loginPassword);
       if (res.resultado === 'ok' && res.nombre && res.email) {
+        guardarEnDirectorioClientes(res.email, res.nombre, res.telefono || '');
         onShowToast('success', `¡Bienvenido de nuevo, ${res.nombre}!`, 'Sesión iniciada correctamente.');
         onLoginSuccess(
           {
@@ -156,6 +175,7 @@ export const AuthModal = ({ isOpen, onClose, onLoginSuccess, onShowToast }: Auth
       );
 
       if (res.resultado === 'ok') {
+        guardarEnDirectorioClientes(regEmail, regNombre, regTelefono);
         onShowToast(
           'success',
           '¡Cuenta verificada y creada con éxito!',
@@ -166,6 +186,7 @@ export const AuthModal = ({ isOpen, onClose, onLoginSuccess, onShowToast }: Auth
         try {
           const loginRes = await gasApi.login(regEmail, regPassword);
           if (loginRes.resultado === 'ok' && loginRes.nombre) {
+            guardarEnDirectorioClientes(loginRes.email || regEmail, loginRes.nombre, loginRes.telefono || regTelefono);
             onLoginSuccess(
               {
                 nombre: loginRes.nombre,

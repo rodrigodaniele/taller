@@ -176,6 +176,16 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
   const [mostradorNombre, setMostradorNombre] = useState('');
   const [mostradorTelefono, setMostradorTelefono] = useState('');
   const [mostradorEmail, setMostradorEmail] = useState('');
+  const [todosLosClientes, setTodosLosClientes] = useState<{ email: string; nombre: string; telefono: string; patente?: string }[]>(() => {
+    try {
+      const saved = localStorage.getItem('taller_directorio_clientes_v1');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [buscandoCliente, setBuscandoCliente] = useState(false);
+  const [clienteEncontradoMsg, setClienteEncontradoMsg] = useState<{ tipo: 'success' | 'info'; texto: string } | null>(null);
 
   // Cancelar Turno por Inasistencia state
   const [turnoACancelar, setTurnoACancelar] = useState<TurnoAdmin | null>(null);
@@ -214,6 +224,81 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
 
         const pendientes = filtrarTurnosPendientes(res.turnos, currentPresupuestos);
         setTurnos(pendientes);
+
+        // Directorio completo de clientes conocidos para autocompletar en mostrador
+        const clientesMap = new Map<string, { email: string; nombre: string; telefono: string; patente?: string }>();
+        try {
+          const saved = localStorage.getItem('taller_directorio_clientes_v1');
+          if (saved) {
+            JSON.parse(saved).forEach((c: any) => {
+              if (c.email) clientesMap.set(c.email.toLowerCase().trim(), c);
+            });
+          }
+        } catch {}
+
+        if (Array.isArray((res as any).usuarios)) {
+          (res as any).usuarios.forEach((u: any) => {
+            if (u.email) {
+              const em = u.email.toLowerCase().trim();
+              const act = clientesMap.get(em) || { email: em, nombre: '', telefono: '', patente: '' };
+              clientesMap.set(em, {
+                email: em,
+                nombre: u.nombre || act.nombre,
+                telefono: u.telefono || act.telefono,
+                patente: act.patente,
+              });
+            }
+          });
+        }
+
+        res.turnos.forEach((t: any) => {
+          if (t.email) {
+            const em = t.email.toLowerCase().trim();
+            const act = clientesMap.get(em) || { email: em, nombre: '', telefono: '', patente: '' };
+            clientesMap.set(em, {
+              email: em,
+              nombre: t.nombre || act.nombre,
+              telefono: t.telefono || act.telefono,
+              patente: (t.patente && t.patente !== 'MOSTRADOR') ? t.patente : act.patente,
+            });
+          }
+        });
+
+        currentPresupuestos.forEach((p: any) => {
+          if (p.clienteEmail) {
+            const em = p.clienteEmail.toLowerCase().trim();
+            const act = clientesMap.get(em) || { email: em, nombre: '', telefono: '', patente: '' };
+            clientesMap.set(em, {
+              email: em,
+              nombre: p.clienteNombre || act.nombre,
+              telefono: p.clienteTelefono || act.telefono,
+              patente: p.patente || act.patente,
+            });
+          }
+        });
+
+        try {
+          const uStr = localStorage.getItem('lacasadeladireccion_user');
+          if (uStr) {
+            const u = JSON.parse(uStr);
+            if (u.email) {
+              const em = u.email.toLowerCase().trim();
+              const act = clientesMap.get(em) || { email: em, nombre: '', telefono: '', patente: '' };
+              clientesMap.set(em, {
+                email: em,
+                nombre: u.nombre || act.nombre,
+                telefono: u.telefono || act.telefono,
+                patente: act.patente,
+              });
+            }
+          }
+        } catch {}
+
+        const listaDirectorio = Array.from(clientesMap.values());
+        setTodosLosClientes(listaDirectorio);
+        try {
+          localStorage.setItem('taller_directorio_clientes_v1', JSON.stringify(listaDirectorio));
+        } catch {}
 
         // Auto-reparación en Google Sheets: si en la planilla Turnos todavía figura como 'Programado'
         // un vehículo que ya fue facturado, atendido o cancelado por inasistencia, enviamos la orden a Google Sheets
@@ -729,51 +814,231 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
     }
   };
 
-  // Autocompletar datos del cliente si el correo ya existe en turnos, presupuestos o Google Sheets
-  const handleMostradorEmailChange = async (val: string) => {
-    setMostradorEmail(val);
-    const cleanEmail = val.trim().toLowerCase();
-    if (!cleanEmail || !cleanEmail.includes('@')) return;
-
-    // 1. Buscar en turnos cargados
-    const matchTurno = turnos.find((t) => (t.email || '').trim().toLowerCase() === cleanEmail);
-    if (matchTurno) {
-      if (matchTurno.nombre) setMostradorNombre(matchTurno.nombre);
-      if (matchTurno.telefono) setMostradorTelefono(matchTurno.telefono);
-      if (matchTurno.patente && !mostradorPatente) setMostradorPatente(matchTurno.patente.toUpperCase());
+  // Buscar y autocompletar datos del cliente por correo
+  const handleBuscarClientePorEmail = async (forzarEmail?: string) => {
+    const emailTarget = (forzarEmail !== undefined ? forzarEmail : mostradorEmail).trim().toLowerCase();
+    if (!emailTarget) {
+      onShowToast('warning', 'Ingresá un correo', 'Escribí el correo electrónico del cliente para buscar sus datos.');
       return;
     }
 
-    // 2. Buscar en presupuestos cargados
-    const matchPres = presupuestos.find((p) => (p.clienteEmail || '').trim().toLowerCase() === cleanEmail);
-    if (matchPres) {
-      if (matchPres.clienteNombre) setMostradorNombre(matchPres.clienteNombre);
-      if (matchPres.clienteTelefono) setMostradorTelefono(matchPres.clienteTelefono);
-      if (matchPres.patente && !mostradorPatente) setMostradorPatente(matchPres.patente.toUpperCase());
-      return;
-    }
+    setBuscandoCliente(true);
+    setClienteEncontradoMsg(null);
 
-    // 3. Buscar en localStorage de usuario activo
     try {
-      const uStr = localStorage.getItem('lacasadeladireccion_user');
-      if (uStr) {
-        const u = JSON.parse(uStr);
-        if ((u.email || '').trim().toLowerCase() === cleanEmail) {
-          if (u.nombre) setMostradorNombre(u.nombre);
-          if (u.telefono) setMostradorTelefono(u.telefono);
-          return;
+      let cliente: { email: string; nombre: string; telefono: string; patente?: string } | null = null;
+
+      // 1. Buscar en memoria local de todos los clientes conocidos
+      const matchLocal = todosLosClientes.find((c) => c.email.toLowerCase().trim() === emailTarget);
+      if (matchLocal && (matchLocal.nombre || matchLocal.telefono)) {
+        cliente = { ...matchLocal };
+      }
+
+      // 2. Buscar en localStorage de directorio de clientes
+      if (!cliente || (!cliente.nombre && !cliente.telefono)) {
+        try {
+          const savedDir = localStorage.getItem('taller_directorio_clientes_v1');
+          if (savedDir) {
+            const list = JSON.parse(savedDir);
+            const m = list.find((c: any) => (c.email || '').toLowerCase().trim() === emailTarget);
+            if (m && (m.nombre || m.telefono)) {
+              cliente = {
+                email: emailTarget,
+                nombre: m.nombre || (cliente?.nombre || ''),
+                telefono: m.telefono || (cliente?.telefono || ''),
+                patente: m.patente || (cliente?.patente || ''),
+              };
+            }
+          }
+        } catch {}
+      }
+
+      // 3. Buscar en turnos activos en memoria del panel admin
+      if (!cliente || (!cliente.nombre && !cliente.telefono)) {
+        const tMatch = turnos.find((t) => (t.email || '').toLowerCase().trim() === emailTarget);
+        if (tMatch && (tMatch.nombre || tMatch.telefono)) {
+          cliente = {
+            email: emailTarget,
+            nombre: tMatch.nombre || (cliente?.nombre || ''),
+            telefono: tMatch.telefono || (cliente?.telefono || ''),
+            patente: (tMatch.patente && tMatch.patente !== 'MOSTRADOR') ? tMatch.patente : (cliente?.patente || ''),
+          };
         }
       }
-    } catch {}
 
-    // 4. Buscar en Google Sheets vía API
-    try {
-      const res = await gasApi.buscarClientePorEmail(cleanEmail);
-      if (res && res.usuario) {
-        if (res.usuario.nombre) setMostradorNombre(res.usuario.nombre);
-        if (res.usuario.telefono) setMostradorTelefono(res.usuario.telefono);
+      // 4. Buscar en presupuestos en memoria del panel admin
+      if (!cliente || (!cliente.nombre && !cliente.telefono)) {
+        const pMatch = presupuestos.find((p) => (p.clienteEmail || '').toLowerCase().trim() === emailTarget);
+        if (pMatch && (pMatch.clienteNombre || pMatch.clienteTelefono)) {
+          cliente = {
+            email: emailTarget,
+            nombre: pMatch.clienteNombre || (cliente?.nombre || ''),
+            telefono: pMatch.clienteTelefono || (cliente?.telefono || ''),
+            patente: pMatch.patente || (cliente?.patente || ''),
+          };
+        }
       }
-    } catch {}
+
+      // 5. Consultar a Google Apps Script en tiempo real con gasApi.buscarClientePorEmail
+      // (combina búsqueda en hoja Usuarios, login 123456, turnos admin e historial)
+      if (!cliente || (!cliente.nombre && !cliente.telefono)) {
+        try {
+          const resSearch = await gasApi.buscarClientePorEmail(emailTarget);
+          if (resSearch && resSearch.success && resSearch.usuario && (resSearch.usuario.nombre || resSearch.usuario.telefono)) {
+            cliente = {
+              email: emailTarget,
+              nombre: resSearch.usuario.nombre || (cliente?.nombre || ''),
+              telefono: resSearch.usuario.telefono || (cliente?.telefono || ''),
+              patente: resSearch.usuario.patente || (cliente?.patente || ''),
+            };
+          }
+        } catch {}
+      }
+
+      // 6. Consultar a Google Sheets en tiempo real vía getAdminTurnos
+      if (!cliente || (!cliente.nombre && !cliente.telefono)) {
+        try {
+          const resTurnos = await gasApi.getAdminTurnos();
+          if (resTurnos && resTurnos.success) {
+            if (Array.isArray((resTurnos as any).usuarios)) {
+              const uMatch = (resTurnos as any).usuarios.find((u: any) => (u.email || '').toLowerCase().trim() === emailTarget);
+              if (uMatch && (uMatch.nombre || uMatch.telefono)) {
+                cliente = {
+                  email: emailTarget,
+                  nombre: uMatch.nombre || (cliente?.nombre || ''),
+                  telefono: uMatch.telefono || (cliente?.telefono || ''),
+                  patente: cliente?.patente || '',
+                };
+              }
+            }
+            if ((!cliente || (!cliente.nombre && !cliente.telefono)) && Array.isArray(resTurnos.turnos)) {
+              const match = resTurnos.turnos.find((t: any) => (t.email || '').toLowerCase().trim() === emailTarget);
+              if (match && (match.nombre || match.telefono)) {
+                cliente = {
+                  email: emailTarget,
+                  nombre: match.nombre || (cliente?.nombre || ''),
+                  telefono: match.telefono || (cliente?.telefono || ''),
+                  patente: (match.patente && match.patente !== 'MOSTRADOR') ? match.patente : (cliente?.patente || ''),
+                };
+              }
+            }
+          }
+        } catch {}
+      }
+
+      // 7. Buscar en usuario activo si coincide
+      if (!cliente || (!cliente.nombre && !cliente.telefono)) {
+        try {
+          const uStr = localStorage.getItem('lacasadeladireccion_user');
+          if (uStr) {
+            const u = JSON.parse(uStr);
+            if ((u.email || '').toLowerCase().trim() === emailTarget && (u.nombre || u.telefono)) {
+              cliente = {
+                email: emailTarget,
+                nombre: u.nombre || (cliente?.nombre || ''),
+                telefono: u.telefono || (cliente?.telefono || ''),
+                patente: cliente?.patente || '',
+              };
+            }
+          }
+        } catch {}
+      }
+
+      // 8. Buscar en turnos del cliente guardados en el navegador
+      if (!cliente || (!cliente.nombre && !cliente.telefono)) {
+        try {
+          const tStr = localStorage.getItem('lacasadeladireccion_turnos');
+          if (tStr) {
+            const tList = JSON.parse(tStr);
+            if (Array.isArray(tList) && tList.length > 0 && tList[0].patente && (!mostradorPatente || mostradorPatente === 'MOSTRADOR')) {
+              setMostradorPatente(tList[0].patente.toUpperCase());
+            }
+          }
+        } catch {}
+      }
+
+      if (cliente && (cliente.nombre || cliente.telefono)) {
+        if (cliente.nombre) setMostradorNombre(cliente.nombre);
+        if (cliente.telefono) setMostradorTelefono(cliente.telefono);
+        if (cliente.patente && (!mostradorPatente || mostradorPatente === 'MOSTRADOR')) {
+          setMostradorPatente(cliente.patente.toUpperCase());
+        }
+
+        // Guardar y consolidar en directorio local
+        const clienteActualizado = {
+          email: emailTarget,
+          nombre: cliente.nombre || mostradorNombre,
+          telefono: cliente.telefono || mostradorTelefono,
+          patente: cliente.patente || mostradorPatente,
+        };
+
+        setTodosLosClientes((prev) => {
+          const next = [...prev.filter((c) => c.email.toLowerCase().trim() !== emailTarget), clienteActualizado];
+          try {
+            localStorage.setItem('taller_directorio_clientes_v1', JSON.stringify(next));
+          } catch {}
+          return next;
+        });
+
+        setClienteEncontradoMsg({
+          tipo: 'success',
+          texto: `Cliente encontrado: ${cliente.nombre || emailTarget}${cliente.telefono ? ` · Tel: ${cliente.telefono}` : ''}`,
+        });
+        onShowToast('success', '¡Datos autocompletados!', `Cliente encontrado: ${cliente.nombre || emailTarget}.`);
+      } else {
+        setClienteEncontradoMsg({
+          tipo: 'info',
+          texto: 'Correo nuevo (no registrado). Al guardar se creará su cuenta web con la contraseña: 123456.',
+        });
+        onShowToast('info', 'Cliente nuevo (no registrado)', 'El correo no existe aún. Ingresá sus datos y al confirmar se creará su usuario con clave 123456.');
+      }
+    } finally {
+      setBuscandoCliente(false);
+    }
+  };
+
+  // Autocompletar datos del cliente si el correo ya existe
+  const handleMostradorEmailChange = (val: string) => {
+    setMostradorEmail(val);
+    setClienteEncontradoMsg(null);
+    const clean = val.trim().toLowerCase();
+    if (!clean || !clean.includes('@') || !clean.includes('.')) return;
+
+    // Autocompletado pasivo en tiempo real si ya está en memoria o en localStorage
+    let match = todosLosClientes.find((c) => c.email.toLowerCase().trim() === clean);
+    if (!match) {
+      try {
+        const saved = localStorage.getItem('taller_directorio_clientes_v1');
+        if (saved) {
+          const list = JSON.parse(saved);
+          match = list.find((c: any) => (c.email || '').toLowerCase().trim() === clean);
+        }
+      } catch {}
+    }
+    if (!match) {
+      const t = turnos.find((x) => (x.email || '').toLowerCase().trim() === clean);
+      if (t) {
+        match = { email: clean, nombre: t.nombre || '', telefono: t.telefono || '', patente: t.patente };
+      }
+    }
+    if (!match) {
+      const p = presupuestos.find((x) => (x.clienteEmail || '').toLowerCase().trim() === clean);
+      if (p) {
+        match = { email: clean, nombre: p.clienteNombre || '', telefono: p.clienteTelefono || '', patente: p.patente };
+      }
+    }
+
+    if (match && (match.nombre || match.telefono)) {
+      if (match.nombre) setMostradorNombre(match.nombre);
+      if (match.telefono) setMostradorTelefono(match.telefono);
+      if (match.patente && (!mostradorPatente || mostradorPatente === 'MOSTRADOR')) {
+        setMostradorPatente(match.patente.toUpperCase());
+      }
+      setClienteEncontradoMsg({
+        tipo: 'success',
+        texto: `Cliente encontrado: ${match.nombre || clean}${match.telefono ? ` · Tel: ${match.telefono}` : ''}`,
+      });
+    }
   };
 
   // Save new turno from mostrador / presencial & auto-create user with password 123456
@@ -816,7 +1081,8 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
       telefono: cleanTelefono,
     };
 
-    const yaExiste = turnos.some((t) => (t.email || '').toLowerCase().trim() === cleanEmail) ||
+    const yaExiste = todosLosClientes.some((c) => c.email.toLowerCase().trim() === cleanEmail) ||
+                     turnos.some((t) => (t.email || '').toLowerCase().trim() === cleanEmail) ||
                      presupuestos.some((p) => (p.clienteEmail || '').toLowerCase().trim() === cleanEmail);
 
     try {
@@ -839,12 +1105,27 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
         email: cleanEmail,
       });
 
+      // Actualizar directorio local
+      const nuevoClienteEnDirectorio = {
+        email: cleanEmail,
+        nombre: cleanNombre,
+        telefono: cleanTelefono,
+        patente: cleanPatente,
+      };
+      setTodosLosClientes((prev) => {
+        const next = [...prev.filter((c) => c.email.toLowerCase().trim() !== cleanEmail), nuevoClienteEnDirectorio];
+        try {
+          localStorage.setItem('taller_directorio_clientes_v1', JSON.stringify(next));
+        } catch {}
+        return next;
+      });
+
       setTurnos((prev) => [nuevoTurnoAdmin, ...prev.filter((t) => t.patente !== cleanPatente || t.fecha !== cleanFecha)]);
 
       onShowToast(
         'success',
         yaExiste ? '¡Turno agendado para cliente existente!' : '¡Turno agendado y Usuario creado!',
-        `Vehículo ${cleanPatente} para el ${cleanFecha} ${mostradorHorario} hs.${yaExiste ? ' Datos del cliente vinculados.' : ' Usuario registrado con contraseña: 123456.'}`
+        `Vehículo ${cleanPatente} para el ${cleanFecha} ${mostradorHorario} hs.${yaExiste ? ' Turno vinculado a su cuenta.' : ' Usuario registrado con contraseña: 123456.'}`
       );
 
       setShowModalTurnoMostrador(false);
@@ -852,6 +1133,7 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
       setMostradorNombre('');
       setMostradorTelefono('');
       setMostradorEmail('');
+      setClienteEncontradoMsg(null);
       fetchTurnos();
     } catch (err: any) {
       console.warn('Falla en llamada directa a GAS:', err);
@@ -1554,19 +1836,23 @@ function obtenerTurnosAdmin() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("Turnos");
   var sheetUsuarios = ss.getSheetByName("Usuarios") || ss.getSheetByName("Clientes") || ss.getSheets()[0];
-  if (!sheet) return { success: true, turnos: [] };
+  if (!sheet) return { success: true, turnos: [], usuarios: [] };
   var datos = sheet.getDataRange().getValues();
 
   var mapaUsuarios = {};
+  var listaUsuarios = [];
   if (sheetUsuarios) {
     var datosU = sheetUsuarios.getDataRange().getValues();
     for (var u = 1; u < datosU.length; u++) {
       if (datosU[u][2]) {
         var emKey = datosU[u][2].toString().toLowerCase().trim();
-        mapaUsuarios[emKey] = {
+        var uItem = {
+          email: emKey,
           nombre: datosU[u][0] ? datosU[u][0].toString() : "",
           telefono: datosU[u][1] ? datosU[u][1].toString() : ""
         };
+        mapaUsuarios[emKey] = uItem;
+        listaUsuarios.push(uItem);
       }
     }
   }
@@ -1587,7 +1873,7 @@ function obtenerTurnosAdmin() {
       });
     }
   }
-  return { success: true, turnos: pendientes };
+  return { success: true, turnos: pendientes, usuarios: listaUsuarios };
 }
 
 // --- FUNCIONES PRESUPUESTOS (HOJA 'Presupuestos') ---
@@ -2260,6 +2546,7 @@ function obtenerHistorialCliente(emailCliente) {
                   type="button"
                   onClick={() => {
                     const hoyStr = getFechaHoyArgentina();
+                    setClienteEncontradoMsg(null);
                     setShowModalTurnoMostrador(true);
                     handleMostradorDateChange(hoyStr);
                   }}
@@ -3121,6 +3408,56 @@ function obtenerHistorialCliente(emailCliente) {
 
                 {/* 3. Datos del Cliente para Creación de Usuario */}
                 <div className="space-y-3 pt-1">
+                  <div>
+                    <label className="block text-xs font-heading font-bold uppercase text-neutral-300 mb-1">
+                      Correo Electrónico del Cliente *
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="email"
+                        required
+                        placeholder="cliente@email.com"
+                        value={mostradorEmail}
+                        onChange={(e) => handleMostradorEmailChange(e.target.value)}
+                        onBlur={() => {
+                          const clean = mostradorEmail.trim().toLowerCase();
+                          if (clean && clean.includes('@') && clean.includes('.') && (!mostradorNombre || !mostradorTelefono)) {
+                            handleBuscarClientePorEmail(clean);
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleBuscarClientePorEmail();
+                          }
+                        }}
+                        className="flex-1 bg-[#111] border border-neutral-800 focus:border-red-600 focus:outline-none rounded-lg px-3 py-2 text-sm text-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleBuscarClientePorEmail()}
+                        disabled={buscandoCliente}
+                        className="px-3.5 py-2 bg-neutral-900 hover:bg-neutral-800 active:scale-95 text-white font-heading font-bold text-xs uppercase tracking-wider rounded-lg border border-neutral-700 hover:border-red-600 transition-all flex items-center gap-1.5 shrink-0 cursor-pointer disabled:opacity-50"
+                        title="Buscar cliente en el sistema para autocompletar nombre y teléfono"
+                      >
+                        {buscandoCliente ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-red-500" />
+                        ) : (
+                          <Search className="w-3.5 h-3.5 text-red-500" />
+                        )}
+                        <span>Traer datos</span>
+                      </button>
+                    </div>
+
+                    {clienteEncontradoMsg && (
+                      <p className={`text-[11px] mt-1.5 font-medium flex items-center gap-1.5 ${
+                        clienteEncontradoMsg.tipo === 'success' ? 'text-emerald-400' : 'text-neutral-400'
+                      }`}>
+                        {clienteEncontradoMsg.tipo === 'success' ? '✅' : 'ℹ️'} {clienteEncontradoMsg.texto}
+                      </p>
+                    )}
+                  </div>
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-heading font-bold uppercase text-neutral-300 mb-1">
@@ -3150,32 +3487,26 @@ function obtenerHistorialCliente(emailCliente) {
                       />
                     </div>
                   </div>
-
-                  <div>
-                    <label className="block text-xs font-heading font-bold uppercase text-neutral-300 mb-1">
-                      Correo Electrónico del Cliente *
-                    </label>
-                    <input
-                      type="email"
-                      required
-                      placeholder="cliente@email.com"
-                      value={mostradorEmail}
-                      onChange={(e) => handleMostradorEmailChange(e.target.value)}
-                      className="w-full bg-[#111] border border-neutral-800 focus:border-red-600 focus:outline-none rounded-lg px-3 py-2 text-sm text-white"
-                    />
-                  </div>
                 </div>
 
                 {/* 4. Notificación de Alta de Usuario Automática con clave 123456 */}
                 <div className="p-3.5 rounded-lg bg-red-950/20 border border-red-800/50 space-y-1">
                   <div className="flex items-center gap-1.5 text-xs font-heading font-black uppercase text-red-400">
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Creación Automática de Usuario Web</span>
+                    <span>{clienteEncontradoMsg?.tipo === 'success' ? 'Cliente Existente Identificado' : 'Creación Automática de Usuario Web'}</span>
                   </div>
                   <p className="text-[11px] text-neutral-300 leading-relaxed">
-                    Al confirmar, el sistema registrará automáticamente al cliente en la base de datos con la contraseña:{' '}
-                    <strong className="text-white font-mono bg-neutral-900 px-2 py-0.5 rounded border border-neutral-700">123456</strong>{' '}
-                    para que pueda ingresar a la web con su correo y consultar su turno o historial.
+                    {clienteEncontradoMsg?.tipo === 'success' ? (
+                      <>
+                        Este cliente ya existe en el taller. El turno se vinculará a su cuenta sin alterar su contraseña actual.
+                      </>
+                    ) : (
+                      <>
+                        Si el correo no existe en el sistema, al confirmar se creará automáticamente su usuario con la contraseña:{' '}
+                        <strong className="text-white font-mono bg-neutral-900 px-2 py-0.5 rounded border border-neutral-700">123456</strong>{' '}
+                        para que pueda ingresar a la web y consultar su turno o historial.
+                      </>
+                    )}
                   </p>
                 </div>
 
