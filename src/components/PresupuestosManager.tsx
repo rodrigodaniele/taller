@@ -449,10 +449,14 @@ export const PresupuestosManager = ({
         gasApi.marcarTurnoAtendido(p.patente).catch((err) => console.warn(err));
       } catch (err) {}
 
-      // 4. Actualizar radar de rotación histórica de repuestos y descontar del inventario si hay stock físico con la misma fecha exacta
+      // 4. Actualizar radar de rotación histórica de repuestos, cargar repuestos en Módulo 1 y descontar del inventario físico
       try {
         if (Array.isArray(p.items) && p.items.length > 0) {
-          gasApi.actualizarRotacionYDescontarStock(p.items, p.vehiculoModelo || p.patente, fechaPresupuesto);
+          gasApi.actualizarRotacionYDescontarStock(p.items, p.vehiculoModelo || p.patente, fechaPresupuesto, {
+            patente: p.patente,
+            clienteNombre: p.clienteNombre,
+            presupuestoNumero: p.numero || p.id,
+          });
         }
       } catch (err) {}
 

@@ -1,4 +1,4 @@
-import { ApiResponse, DatosTrabajoAdmin, TurnoAdmin, Presupuesto, ItemStock, ItemPresupuesto } from '../types';
+import { ApiResponse, DatosTrabajoAdmin, TurnoAdmin, Presupuesto, ItemStock, ItemPresupuesto, RepuestoUsado, CompraRepuesto } from '../types';
 import { getFechaHoyArgentina, normalizarFechaArgentina } from '../utils/dateFormatter';
 
 export const DEFAULT_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbziaELEqc9K1IKN2iXdEZ6bDN-GRUEJUUneEWfGM2VFg60uunAq_vb7gOIsxaDJEL08FA/exec";
@@ -583,7 +583,8 @@ export const gasApi = {
   async actualizarRotacionYDescontarStock(
     items: ItemPresupuesto[],
     vehiculoModelo?: string,
-    fechaMovimiento?: string
+    fechaMovimiento?: string,
+    meta?: { patente?: string; clienteNombre?: string; presupuestoNumero?: string }
   ): Promise<void> {
     try {
       const repuestos = items.filter((it) => it.tipo === 'repuesto');
@@ -592,6 +593,10 @@ export const gasApi = {
       const saved = localStorage.getItem('taller_stock_v1');
       const list: ItemStock[] = saved ? JSON.parse(saved) : [];
       const fechaFinal = fechaMovimiento ? normalizarFechaArgentina(fechaMovimiento) : getFechaHoyArgentina();
+
+      // Registro de repuestos usados para el Módulo 1 (Rotación y consumos del taller)
+      const savedUsados = localStorage.getItem('taller_repuestos_usados_v1');
+      const listaUsados: RepuestoUsado[] = savedUsados ? JSON.parse(savedUsados) : [];
 
       repuestos.forEach((rep) => {
         const cant = Number(rep.cantidad) || 1;
@@ -605,15 +610,15 @@ export const gasApi = {
         );
 
         if (stockItem) {
-          // Si tiene stock físico disponible, se descuenta
+          // Si tiene stock físico disponible, se descuenta 1 (o la cantidad usada)
           if (stockItem.stockActual > 0) {
             stockItem.stockActual = Math.max(0, stockItem.stockActual - cant);
           }
-          // Sumar siempre a la rotación histórica de piezas cambiadas
+          // Sumar a la rotación histórica de piezas cambiadas
           stockItem.totalInstalados = (Number(stockItem.totalInstalados) || 0) + cant;
           stockItem.ultimoMovimiento = fechaFinal;
         } else {
-          // Registrar automáticamente la nueva pieza en el catálogo para llevar estadística de rotación
+          // Registrar en catálogo para estadísticas de rotación futura
           const nuevoItem: ItemStock = {
             id: 'STOCK-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
             nombre: rep.descripcion.trim(),
@@ -628,9 +633,27 @@ export const gasApi = {
           };
           list.push(nuevoItem);
         }
+
+        // Agregar al historial de repuestos utilizados (Módulo 1)
+        const nuevoUso: RepuestoUsado = {
+          id: 'USO-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+          fecha: fechaFinal,
+          repuestoNombre: rep.descripcion.trim(),
+          cantidad: cant,
+          vehiculo: vehiculoModelo || '',
+          patente: meta?.patente || '',
+          cliente: meta?.clienteNombre || '',
+          origen: 'facturacion',
+          presupuestoId: meta?.presupuestoNumero || '',
+          observaciones: meta?.presupuestoNumero
+            ? `Facturado automáticamente en Presupuesto #${meta.presupuestoNumero}`
+            : 'Facturado automáticamente desde servicio de taller',
+        };
+        listaUsados.unshift(nuevoUso);
       });
 
       localStorage.setItem('taller_stock_v1', JSON.stringify(list));
+      localStorage.setItem('taller_repuestos_usados_v1', JSON.stringify(listaUsados));
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('taller_stock_sync'));
@@ -644,6 +667,243 @@ export const gasApi = {
       }
     } catch (e) {
       console.warn('Error al actualizar rotación de stock:', e);
+    }
+  },
+
+  /**
+   * MÓDULO 1: Obtener lista de repuestos utilizados / consumidos en taller
+   */
+  async getRepuestosUsados(): Promise<{ success: boolean; items: RepuestoUsado[] }> {
+    try {
+      const saved = localStorage.getItem('taller_repuestos_usados_v1');
+      const list: RepuestoUsado[] = saved ? JSON.parse(saved) : [];
+      return { success: true, items: list };
+    } catch (e) {
+      console.warn('Error al obtener repuestos usados:', e);
+      return { success: true, items: [] };
+    }
+  },
+
+  /**
+   * MÓDULO 1: Registrar manualmente un repuesto utilizado (descuenta stock, NO impacta en contabilidad)
+   */
+  async registrarRepuestoUsado(
+    uso: Omit<RepuestoUsado, 'id'>
+  ): Promise<{ success: boolean; item: RepuestoUsado; error?: string }> {
+    try {
+      const id = 'USO-' + Date.now();
+      const nuevoUso: RepuestoUsado = { ...uso, id };
+
+      // 1. Guardar en lista de consumos/rotación
+      const savedUsados = localStorage.getItem('taller_repuestos_usados_v1');
+      const listaUsados: RepuestoUsado[] = savedUsados ? JSON.parse(savedUsados) : [];
+      listaUsados.unshift(nuevoUso);
+      localStorage.setItem('taller_repuestos_usados_v1', JSON.stringify(listaUsados));
+
+      // 2. Descontar del inventario físico y sumar a la rotación histórica
+      const savedStock = localStorage.getItem('taller_stock_v1');
+      const listStock: ItemStock[] = savedStock ? JSON.parse(savedStock) : [];
+      const cant = Number(uso.cantidad) || 1;
+      const nomNorm = uso.repuestoNombre.trim().toUpperCase();
+
+      let stockItem = listStock.find(
+        (x) =>
+          x.nombre.trim().toUpperCase() === nomNorm ||
+          nomNorm.includes(x.nombre.trim().toUpperCase()) ||
+          x.nombre.trim().toUpperCase().includes(nomNorm)
+      );
+
+      if (stockItem) {
+        if (stockItem.stockActual > 0) {
+          stockItem.stockActual = Math.max(0, stockItem.stockActual - cant);
+        }
+        stockItem.totalInstalados = (Number(stockItem.totalInstalados) || 0) + cant;
+        stockItem.ultimoMovimiento = uso.fecha;
+      } else {
+        // Si no existía en el inventario, agregarlo con stock actual 0
+        const nuevoItem: ItemStock = {
+          id: 'STOCK-' + Date.now(),
+          nombre: uso.repuestoNombre.trim().toUpperCase(),
+          categoria: 'Tren Delantero / Suspensión',
+          vehiculoCompatibilidad: uso.vehiculo || 'Multimarca',
+          stockActual: 0,
+          stockMinimo: 2,
+          costoUnitario: 0,
+          precioVenta: 0,
+          totalInstalados: cant,
+          ultimoMovimiento: uso.fecha,
+        };
+        listStock.push(nuevoItem);
+      }
+      localStorage.setItem('taller_stock_v1', JSON.stringify(listStock));
+
+      // 3. Notificar en vivo a toda la app
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('taller_stock_sync'));
+        if (typeof BroadcastChannel !== 'undefined') {
+          try {
+            const bc = new BroadcastChannel('lacasadeladireccion_realtime');
+            bc.postMessage({ type: 'STOCK_UPDATED' });
+            bc.close();
+          } catch {}
+        }
+      }
+
+      return { success: true, item: nuevoUso };
+    } catch (err: any) {
+      console.error('Error al registrar repuesto usado:', err);
+      return { success: false, item: { ...uso, id: '' }, error: err.message };
+    }
+  },
+
+  /**
+   * MÓDULO 1: Eliminar o anular un registro de repuesto usado (restituye el stock físico)
+   */
+  async eliminarRepuestoUsado(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const savedUsados = localStorage.getItem('taller_repuestos_usados_v1');
+      if (!savedUsados) return { success: true };
+      const listaUsados: RepuestoUsado[] = JSON.parse(savedUsados);
+      const target = listaUsados.find((x) => x.id === id);
+
+      if (target) {
+        // Restituir cantidad al stock físico
+        const savedStock = localStorage.getItem('taller_stock_v1');
+        if (savedStock) {
+          const listStock: ItemStock[] = JSON.parse(savedStock);
+          const nomNorm = target.repuestoNombre.trim().toUpperCase();
+          const stockItem = listStock.find(
+            (x) =>
+              x.nombre.trim().toUpperCase() === nomNorm ||
+              nomNorm.includes(x.nombre.trim().toUpperCase()) ||
+              x.nombre.trim().toUpperCase().includes(nomNorm)
+          );
+          if (stockItem) {
+            stockItem.stockActual = (Number(stockItem.stockActual) || 0) + (Number(target.cantidad) || 1);
+            stockItem.totalInstalados = Math.max(0, (Number(stockItem.totalInstalados) || 0) - (Number(target.cantidad) || 1));
+            localStorage.setItem('taller_stock_v1', JSON.stringify(listStock));
+          }
+        }
+
+        const filtered = listaUsados.filter((x) => x.id !== id);
+        localStorage.setItem('taller_repuestos_usados_v1', JSON.stringify(filtered));
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('taller_stock_sync'));
+        if (typeof BroadcastChannel !== 'undefined') {
+          try {
+            const bc = new BroadcastChannel('lacasadeladireccion_realtime');
+            bc.postMessage({ type: 'STOCK_UPDATED' });
+            bc.close();
+          } catch {}
+        }
+      }
+
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  /**
+   * MÓDULO 2: Obtener historial de compras de repuestos realizadas para el taller
+   */
+  async getComprasRepuestos(): Promise<{ success: boolean; items: CompraRepuesto[] }> {
+    try {
+      const saved = localStorage.getItem('taller_compras_repuestos_v1');
+      const list: CompraRepuesto[] = saved ? JSON.parse(saved) : [];
+      return { success: true, items: list };
+    } catch (e) {
+      console.warn('Error al obtener compras de repuestos:', e);
+      return { success: true, items: [] };
+    }
+  },
+
+  /**
+   * MÓDULO 2: Registrar compra de repuestos (suma unidades al stock, e IMPACTA EN CONTABILIDAD COMO GASTO NEGATIVO)
+   */
+  async registrarCompraRepuesto(
+    compra: Omit<CompraRepuesto, 'id'>
+  ): Promise<{ success: boolean; item: CompraRepuesto; error?: string }> {
+    try {
+      const id = 'COMPRA-' + Date.now();
+      const nuevaCompra: CompraRepuesto = { ...compra, id };
+
+      // 1. Guardar en historial de compras de repuestos
+      const savedCompras = localStorage.getItem('taller_compras_repuestos_v1');
+      const listaCompras: CompraRepuesto[] = savedCompras ? JSON.parse(savedCompras) : [];
+      listaCompras.unshift(nuevaCompra);
+      localStorage.setItem('taller_compras_repuestos_v1', JSON.stringify(listaCompras));
+
+      // 2. Sumar unidades al inventario físico de repuestos
+      const savedStock = localStorage.getItem('taller_stock_v1');
+      const listStock: ItemStock[] = savedStock ? JSON.parse(savedStock) : [];
+      const nomNorm = compra.repuestoNombre.trim().toUpperCase();
+
+      let stockItem = listStock.find(
+        (x) =>
+          x.nombre.trim().toUpperCase() === nomNorm ||
+          nomNorm.includes(x.nombre.trim().toUpperCase()) ||
+          x.nombre.trim().toUpperCase().includes(nomNorm)
+      );
+
+      if (stockItem) {
+        stockItem.stockActual = (Number(stockItem.stockActual) || 0) + Number(compra.cantidad);
+        if (compra.costoUnitario > 0) {
+          stockItem.costoUnitario = compra.costoUnitario;
+        }
+        stockItem.ultimoMovimiento = compra.fecha;
+      } else {
+        // Dar de alta nuevo ítem en inventario
+        const nuevoItem: ItemStock = {
+          id: 'STOCK-' + Date.now(),
+          nombre: compra.repuestoNombre.trim().toUpperCase(),
+          categoria: compra.categoria || 'Tren Delantero / Suspensión',
+          vehiculoCompatibilidad: compra.vehiculoCompatibilidad || 'Multimarca',
+          stockActual: Number(compra.cantidad),
+          stockMinimo: 2,
+          costoUnitario: compra.costoUnitario || (compra.cantidad > 0 ? Math.round(compra.costoTotal / compra.cantidad) : 0),
+          precioVenta: compra.costoUnitario ? Math.round(compra.costoUnitario * 1.4) : 0,
+          totalInstalados: 0,
+          ultimoMovimiento: compra.fecha,
+        };
+        listStock.push(nuevoItem);
+      }
+      localStorage.setItem('taller_stock_v1', JSON.stringify(listStock));
+
+      // 3. IMPACTAR EN CONTABILIDAD COMO GASTO NEGATIVO (Requerimiento estricto del usuario)
+      if (compra.impactaContabilidad && compra.costoTotal > 0) {
+        const provTxt = compra.proveedor ? ` (${compra.proveedor})` : '';
+        const movGasto = {
+          id: 'MOV-STOCK-' + Date.now(),
+          fecha: compra.fecha ? normalizarFechaArgentina(compra.fecha) : getFechaHoyArgentina(),
+          tipo: 'gasto' as const,
+          concepto: `Compra Repuestos: ${compra.cantidad}x ${compra.repuestoNombre}${provTxt}`,
+          categoria: 'Repuestos / Repuesteros',
+          monto: Number(compra.costoTotal),
+          metodoPago: compra.metodoPago || 'Efectivo',
+          referencia: compra.comprobante ? `COMPROBANTE ${compra.comprobante}` : 'COMPRA STOCK TALLER',
+        };
+        await gasApi.addAccountingMovement(movGasto);
+      }
+
+      // 4. Notificar a toda la interfaz
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('taller_stock_sync'));
+        if (typeof BroadcastChannel !== 'undefined') {
+          try {
+            const bc = new BroadcastChannel('lacasadeladireccion_realtime');
+            bc.postMessage({ type: 'STOCK_UPDATED' });
+            bc.close();
+          } catch {}
+        }
+      }
+
+      return { success: true, item: nuevaCompra };
+    } catch (err: any) {
+      console.error('Error al registrar compra de repuestos:', err);
+      return { success: false, item: { ...compra, id: '' }, error: err.message };
     }
   },
 };

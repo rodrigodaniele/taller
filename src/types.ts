@@ -74,6 +74,34 @@ export interface ItemStock {
   ultimoMovimiento?: string;
 }
 
+export interface RepuestoUsado {
+  id: string;
+  fecha: string;
+  repuestoNombre: string;
+  cantidad: number;
+  vehiculo?: string;
+  patente?: string;
+  cliente?: string;
+  origen: 'manual' | 'facturacion' | 'presupuesto';
+  presupuestoId?: string;
+  observaciones?: string;
+}
+
+export interface CompraRepuesto {
+  id: string;
+  fecha: string;
+  repuestoNombre: string;
+  categoria?: string;
+  vehiculoCompatibilidad?: string;
+  cantidad: number;
+  costoUnitario: number;
+  costoTotal: number;
+  proveedor?: string;
+  metodoPago: string;
+  comprobante?: string;
+  impactaContabilidad: boolean;
+}
+
 export interface Presupuesto {
   id: string;
   numero: string;
