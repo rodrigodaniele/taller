@@ -3,6 +3,7 @@ import { ItemStock, RepuestoUsado, CompraRepuesto } from '../types';
 import { gasApi } from '../services/gasApi';
 import { getFechaHoyArgentina, normalizarFechaArgentina, formatearFechaArgentina } from '../utils/dateFormatter';
 import { REPUESTOS_TALLER_PIEZAS } from '../constants/workshopItems';
+import { VEHICULOS_POR_MARCA } from '../constants/vehiclesArgentina';
 import {
   Package,
   TrendingUp,
@@ -61,9 +62,11 @@ export const StockManager = ({
   // Modals de Módulo 1 (Cargar Repuesto Utilizado)
   const [showModalUsado, setShowModalUsado] = useState(false);
   const [guardandoUsado, setGuardandoUsado] = useState(false);
-  const [usadoPiezaNombre, setUsadoPiezaNombre] = useState('');
+  const [usadoModo, setUsadoModo] = useState<'catalogo' | 'listas'>('catalogo');
+  const [usadoItemId, setUsadoItemId] = useState<string>('');
+  const [usadoPieza, setUsadoPieza] = useState<string>(REPUESTOS_TALLER_PIEZAS[0] || 'RÓTULA DE SUSPENSIÓN');
+  const [usadoVehiculo, setUsadoVehiculo] = useState<string>('Peugeot 206');
   const [usadoCantidad, setUsadoCantidad] = useState('1');
-  const [usadoVehiculo, setUsadoVehiculo] = useState('');
   const [usadoPatente, setUsadoPatente] = useState('');
   const [usadoCliente, setUsadoCliente] = useState('');
   const [usadoFecha, setUsadoFecha] = useState(getFechaHoyArgentina());
@@ -74,9 +77,9 @@ export const StockManager = ({
   const [guardandoCompra, setGuardandoCompra] = useState(false);
   const [compraModoPieza, setCompraModoPieza] = useState<'existente' | 'nueva'>('existente');
   const [compraItemId, setCompraItemId] = useState<string>('');
-  const [compraPiezaNombre, setCompraPiezaNombre] = useState('');
+  const [compraPieza, setCompraPieza] = useState<string>(REPUESTOS_TALLER_PIEZAS[0] || 'RÓTULA DE SUSPENSIÓN');
+  const [compraVehiculo, setCompraVehiculo] = useState<string>('Peugeot 206');
   const [compraCategoria, setCompraCategoria] = useState('Tren Delantero / Suspensión');
-  const [compraVehiculo, setCompraVehiculo] = useState('');
   const [compraCantidad, setCompraCantidad] = useState('10');
   const [compraCostoTotal, setCompraCostoTotal] = useState('');
   const [compraProveedor, setCompraProveedor] = useState('');
@@ -88,9 +91,9 @@ export const StockManager = ({
   const [showModalItem, setShowModalItem] = useState(false);
   const [itemEnEdicion, setItemEnEdicion] = useState<ItemStock | null>(null);
   const [guardandoItem, setGuardandoItem] = useState(false);
-  const [nombreItem, setNombreItem] = useState('');
+  const [itemPieza, setItemPieza] = useState<string>(REPUESTOS_TALLER_PIEZAS[0] || 'RÓTULA DE SUSPENSIÓN');
+  const [itemVehiculo, setItemVehiculo] = useState<string>('Peugeot 206');
   const [categoriaItem, setCategoriaItem] = useState('Tren Delantero / Suspensión');
-  const [vehiculoCompatibilidadItem, setVehiculoCompatibilidadItem] = useState('');
   const [stockActualItem, setStockActualItem] = useState('0');
   const [stockMinimoItem, setStockMinimoItem] = useState('2');
   const [costoUnitarioItem, setCostoUnitarioItem] = useState('');
@@ -136,9 +139,16 @@ export const StockManager = ({
   // MANEJADORES: MÓDULO 1 (REPUESTOS UTILIZADOS)
   // ----------------------------------------------------
   const abrirModalNuevoUsado = () => {
-    setUsadoPiezaNombre('');
+    if (stockList.length > 0) {
+      setUsadoModo('catalogo');
+      setUsadoItemId(stockList[0]?.id || '');
+      setUsadoVehiculo(stockList[0]?.vehiculoCompatibilidad || 'Peugeot 206');
+    } else {
+      setUsadoModo('listas');
+      setUsadoPieza(REPUESTOS_TALLER_PIEZAS[0] || 'RÓTULA DE SUSPENSIÓN');
+      setUsadoVehiculo('Peugeot 206');
+    }
     setUsadoCantidad('1');
-    setUsadoVehiculo('');
     setUsadoPatente('');
     setUsadoCliente('');
     setUsadoFecha(getFechaHoyArgentina());
@@ -148,10 +158,28 @@ export const StockManager = ({
 
   const handleGuardarRepuestoUsado = async (e: React.FormEvent) => {
     e.preventDefault();
-    const pieza = usadoPiezaNombre.trim();
-    if (!pieza) {
-      onShowToast('warning', 'Falta el repuesto', 'Ingresá el nombre de la pieza utilizada.');
-      return;
+    let piezaNombre = '';
+    let vehiculo = '';
+
+    if (usadoModo === 'catalogo') {
+      const it = stockList.find((x) => x.id === usadoItemId);
+      if (!it) {
+        onShowToast('warning', 'Seleccioná un repuesto', 'Elegí un repuesto del menú desplegable.');
+        return;
+      }
+      piezaNombre = it.nombre;
+      vehiculo = it.vehiculoCompatibilidad || '';
+    } else {
+      if (!usadoPieza) {
+        onShowToast('warning', 'Falta la pieza', 'Seleccioná la pieza del menú desplegable.');
+        return;
+      }
+      if (!usadoVehiculo) {
+        onShowToast('warning', 'Falta el vehículo', 'Seleccioná el modelo del vehículo del menú desplegable.');
+        return;
+      }
+      piezaNombre = `${usadoPieza} - ${usadoVehiculo}`;
+      vehiculo = usadoVehiculo;
     }
 
     const cant = parseInt(usadoCantidad, 10);
@@ -164,9 +192,9 @@ export const StockManager = ({
     try {
       const res = await gasApi.registrarRepuestoUsado({
         fecha: normalizarFechaArgentina(usadoFecha),
-        repuestoNombre: pieza.toUpperCase(),
+        repuestoNombre: piezaNombre,
         cantidad: cant,
-        vehiculo: usadoVehiculo.trim() || undefined,
+        vehiculo: vehiculo || undefined,
         patente: usadoPatente.trim().toUpperCase() || undefined,
         cliente: usadoCliente.trim() || undefined,
         origen: 'manual',
@@ -182,7 +210,7 @@ export const StockManager = ({
         onShowToast(
           'success',
           'Repuesto Utilizado Registrado',
-          `Se descontó ${cant} unid. de "${pieza.toUpperCase()}" y se sumó a la rotación. No afecta contabilidad.`
+          `Se descontó ${cant} unid. de "${piezaNombre}" y se sumó a la rotación. No afecta contabilidad.`
         );
         setShowModalUsado(false);
       } else {
@@ -222,17 +250,15 @@ export const StockManager = ({
     if (item) {
       setCompraModoPieza('existente');
       setCompraItemId(item.id);
-      setCompraPiezaNombre(item.nombre);
       setCompraCategoria(item.categoria || 'Tren Delantero / Suspensión');
-      setCompraVehiculo(item.vehiculoCompatibilidad || '');
       setCompraCantidad('10');
       setCompraCostoTotal(item.costoUnitario > 0 ? String(item.costoUnitario * 10) : '');
     } else {
       setCompraModoPieza(stockList.length > 0 ? 'existente' : 'nueva');
       setCompraItemId(stockList[0]?.id || '');
-      setCompraPiezaNombre(stockList[0]?.nombre || '');
-      setCompraCategoria(stockList[0]?.categoria || 'Tren Delantero / Suspensión');
-      setCompraVehiculo(stockList[0]?.vehiculoCompatibilidad || '');
+      setCompraPieza(REPUESTOS_TALLER_PIEZAS[0] || 'RÓTULA DE SUSPENSIÓN');
+      setCompraVehiculo('Peugeot 206');
+      setCompraCategoria('Tren Delantero / Suspensión');
       setCompraCantidad('10');
       setCompraCostoTotal('');
     }
@@ -247,9 +273,7 @@ export const StockManager = ({
     setCompraItemId(id);
     const item = stockList.find((x) => x.id === id);
     if (item) {
-      setCompraPiezaNombre(item.nombre);
       setCompraCategoria(item.categoria || 'Tren Delantero / Suspensión');
-      setCompraVehiculo(item.vehiculoCompatibilidad || '');
       const cant = parseInt(compraCantidad, 10) || 10;
       if (item.costoUnitario > 0) {
         setCompraCostoTotal(String(item.costoUnitario * cant));
@@ -259,10 +283,30 @@ export const StockManager = ({
 
   const handleGuardarCompraRepuesto = async (e: React.FormEvent) => {
     e.preventDefault();
-    const pieza = compraPiezaNombre.trim().toUpperCase();
-    if (!pieza) {
-      onShowToast('warning', 'Falta el nombre', 'Ingresá el nombre del repuesto comprado.');
-      return;
+    let piezaNombre = '';
+    let vehiculo = '';
+    let categoria = compraCategoria;
+
+    if (compraModoPieza === 'existente') {
+      const it = stockList.find((x) => x.id === compraItemId);
+      if (!it) {
+        onShowToast('warning', 'Seleccioná un repuesto', 'Elegí un repuesto existente del menú desplegable.');
+        return;
+      }
+      piezaNombre = it.nombre;
+      vehiculo = it.vehiculoCompatibilidad || 'Multimarca';
+      categoria = it.categoria || compraCategoria;
+    } else {
+      if (!compraPieza) {
+        onShowToast('warning', 'Falta la pieza', 'Seleccioná la pieza del menú desplegable.');
+        return;
+      }
+      if (!compraVehiculo) {
+        onShowToast('warning', 'Falta el vehículo', 'Seleccioná el modelo del vehículo del menú desplegable.');
+        return;
+      }
+      piezaNombre = `${compraPieza} - ${compraVehiculo}`;
+      vehiculo = compraVehiculo;
     }
 
     const cant = parseInt(compraCantidad, 10);
@@ -278,9 +322,9 @@ export const StockManager = ({
     try {
       const res = await gasApi.registrarCompraRepuesto({
         fecha: normalizarFechaArgentina(compraFecha),
-        repuestoNombre: pieza,
-        categoria: compraCategoria,
-        vehiculoCompatibilidad: compraVehiculo.trim() || 'Multimarca',
+        repuestoNombre: piezaNombre,
+        categoria,
+        vehiculoCompatibilidad: vehiculo,
         cantidad: cant,
         costoUnitario: unitario,
         costoTotal: total,
@@ -292,7 +336,7 @@ export const StockManager = ({
       if (res.success) {
         if (compraImpactaContabilidad && total > 0 && onRegistrarGastoContabilidad) {
           onRegistrarGastoContabilidad(
-            `Compra Repuestos: ${cant}x ${pieza}${compraProveedor ? ` (${compraProveedor})` : ''}`,
+            `Compra Repuestos: ${cant}x ${piezaNombre}${compraProveedor ? ` (${compraProveedor})` : ''}`,
             total,
             compraMetodoPago
           );
@@ -305,7 +349,7 @@ export const StockManager = ({
         onShowToast(
           'success',
           '¡Compra de Repuestos Registrada!',
-          `Se sumaron +${cant} unidades a "${pieza}".${
+          `Se sumaron +${cant} unidades a "${piezaNombre}".${
             compraImpactaContabilidad && total > 0
               ? ` Se cargó -$${total.toLocaleString('es-AR')} en Contabilidad.`
               : ''
@@ -327,9 +371,9 @@ export const StockManager = ({
   // ----------------------------------------------------
   const abrirModalNuevoItemCatalogo = () => {
     setItemEnEdicion(null);
-    setNombreItem('');
+    setItemPieza(REPUESTOS_TALLER_PIEZAS[0] || 'RÓTULA DE SUSPENSIÓN');
+    setItemVehiculo('Peugeot 206');
     setCategoriaItem('Tren Delantero / Suspensión');
-    setVehiculoCompatibilidadItem('');
     setStockActualItem('0');
     setStockMinimoItem('2');
     setCostoUnitarioItem('');
@@ -339,9 +383,15 @@ export const StockManager = ({
 
   const abrirModalEditarItemCatalogo = (item: ItemStock) => {
     setItemEnEdicion(item);
-    setNombreItem(item.nombre);
+    const partes = item.nombre.split(' - ');
+    if (partes.length >= 2) {
+      setItemPieza(partes[0].trim());
+      setItemVehiculo(partes.slice(1).join(' - ').trim());
+    } else {
+      setItemPieza(item.nombre);
+      setItemVehiculo(item.vehiculoCompatibilidad || 'Peugeot 206');
+    }
     setCategoriaItem(item.categoria || 'Tren Delantero / Suspensión');
-    setVehiculoCompatibilidadItem(item.vehiculoCompatibilidad || '');
     setStockActualItem(String(item.stockActual || 0));
     setStockMinimoItem(String(item.stockMinimo || 2));
     setCostoUnitarioItem(item.costoUnitario ? String(item.costoUnitario) : '');
@@ -351,17 +401,19 @@ export const StockManager = ({
 
   const handleGuardarItemCatalogo = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!nombreItem.trim()) {
-      onShowToast('warning', 'Falta el nombre', 'Ingresá el nombre del repuesto.');
+    if (!itemPieza || !itemVehiculo) {
+      onShowToast('warning', 'Campos requeridos', 'Seleccioná la pieza y el vehículo de los menús desplegables.');
       return;
     }
+
+    const nombreUnificado = `${itemPieza} - ${itemVehiculo}`;
 
     setGuardandoItem(true);
     const itemGuardado: ItemStock = {
       id: itemEnEdicion ? itemEnEdicion.id : 'STOCK-' + Date.now(),
-      nombre: nombreItem.trim().toUpperCase(),
+      nombre: nombreUnificado,
       categoria: categoriaItem.trim(),
-      vehiculoCompatibilidad: vehiculoCompatibilidadItem.trim() || 'Multimarca',
+      vehiculoCompatibilidad: itemVehiculo.trim(),
       stockActual: Math.max(0, parseInt(stockActualItem, 10) || 0),
       stockMinimo: Math.max(0, parseInt(stockMinimoItem, 10) || 2),
       costoUnitario: Math.max(0, parseFloat(costoUnitarioItem) || 0),
@@ -1335,44 +1387,116 @@ export const StockManager = ({
             </div>
 
             <form onSubmit={handleGuardarRepuestoUsado} className="space-y-4">
-              {/* Selector rápido o libre de repuesto */}
-              <div>
-                <label className="block text-[11px] font-heading font-bold uppercase text-neutral-400 mb-1">
-                  Repuesto o Pieza Utilizada *
-                </label>
-                <div className="space-y-2">
-                  {stockList.length > 0 && (
+              {/* Selector de modo si hay catálogo disponible */}
+              {stockList.length > 0 && (
+                <div className="grid grid-cols-2 gap-2 p-1 bg-neutral-950 rounded-lg">
+                  <button
+                    type="button"
+                    onClick={() => setUsadoModo('catalogo')}
+                    className={`py-2 rounded text-xs font-heading font-bold uppercase transition-all cursor-pointer ${
+                      usadoModo === 'catalogo'
+                        ? 'bg-blue-600 text-white shadow'
+                        : 'text-neutral-400 hover:text-white'
+                    }`}
+                  >
+                    Repuesto en Catálogo ({stockList.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUsadoModo('listas')}
+                    className={`py-2 rounded text-xs font-heading font-bold uppercase transition-all cursor-pointer ${
+                      usadoModo === 'listas'
+                        ? 'bg-blue-600 text-white shadow'
+                        : 'text-neutral-400 hover:text-white'
+                    }`}
+                  >
+                    Elegir Pieza + Auto
+                  </button>
+                </div>
+              )}
+
+              {/* Si es de Catálogo existente */}
+              {usadoModo === 'catalogo' && stockList.length > 0 ? (
+                <div>
+                  <label className="block text-[11px] font-heading font-bold uppercase text-neutral-400 mb-1">
+                    Seleccionar Repuesto Utilizado (Menú Desplegable) *
+                  </label>
+                  <select
+                    value={usadoItemId}
+                    onChange={(e) => {
+                      setUsadoItemId(e.target.value);
+                      const it = stockList.find((x) => x.id === e.target.value);
+                      if (it && it.vehiculoCompatibilidad) {
+                        setUsadoVehiculo(it.vehiculoCompatibilidad);
+                      }
+                    }}
+                    required
+                    className="w-full bg-neutral-950 border border-neutral-800 text-xs text-white rounded-lg px-3 py-2.5 font-bold focus:border-blue-500 focus:outline-none"
+                  >
+                    <option value="">-- Seleccionar de los repuestos del taller --</option>
+                    {stockList.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.nombre} (Stock actual: {item.stockActual} unid.)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                /* Si elige Pieza + Auto de los desplegables estandarizados */
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-[11px] font-heading font-bold uppercase text-neutral-400 mb-1">
+                      1. Pieza / Repuesto (Menú Desplegable) *
+                    </label>
                     <select
-                      onChange={(e) => {
-                        if (e.target.value) {
-                          setUsadoPiezaNombre(e.target.value);
-                          const it = stockList.find((x) => x.nombre === e.target.value);
-                          if (it && it.vehiculoCompatibilidad && !usadoVehiculo) {
-                            setUsadoVehiculo(it.vehiculoCompatibilidad);
-                          }
-                        }
-                      }}
-                      className="w-full bg-neutral-950 border border-neutral-800 text-xs text-white rounded-lg px-3 py-2 font-medium"
+                      value={usadoPieza}
+                      onChange={(e) => setUsadoPieza(e.target.value)}
+                      required
+                      className="w-full bg-neutral-950 border border-neutral-800 text-xs text-white rounded-lg px-3 py-2.5 font-bold focus:border-blue-500 focus:outline-none"
                     >
-                      <option value="">-- Seleccionar de repuestos existentes en catálogo --</option>
-                      {stockList.map((item) => (
-                        <option key={item.id} value={item.nombre}>
-                          {item.nombre} (Stock actual: {item.stockActual} unid.)
+                      <option value="">-- Seleccionar Repuesto Estándar --</option>
+                      {REPUESTOS_TALLER_PIEZAS.map((p) => (
+                        <option key={p} value={p}>
+                          🔩 {p}
                         </option>
                       ))}
                     </select>
-                  )}
+                  </div>
 
-                  <input
-                    type="text"
-                    required
-                    placeholder="O escribí el nombre: Ej: RÓTULA PEUGEOT 206, BIELETA DELANTERA..."
-                    value={usadoPiezaNombre}
-                    onChange={(e) => setUsadoPiezaNombre(e.target.value)}
-                    className="w-full bg-neutral-950 border border-neutral-800 focus:border-blue-600 focus:outline-none rounded-lg px-3 py-2 text-xs text-white uppercase font-bold"
-                  />
+                  <div>
+                    <label className="block text-[11px] font-heading font-bold uppercase text-neutral-400 mb-1">
+                      2. Vehículo / Auto (Menú Desplegable) *
+                    </label>
+                    <select
+                      value={usadoVehiculo}
+                      onChange={(e) => setUsadoVehiculo(e.target.value)}
+                      required
+                      className="w-full bg-neutral-950 border border-neutral-800 text-xs text-white rounded-lg px-3 py-2.5 font-bold focus:border-blue-500 focus:outline-none"
+                    >
+                      <option value="">-- Seleccionar Marca y Modelo de Argentina --</option>
+                      {VEHICULOS_POR_MARCA.map((grupo) => (
+                        <optgroup key={grupo.marca} label={`🚗 ${grupo.marca}`}>
+                          {grupo.modelos.map((m) => (
+                            <option key={m} value={m}>
+                              {m}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Previsualización del nombre unificado */}
+                  {usadoPieza && usadoVehiculo && (
+                    <div className="p-2.5 rounded-lg bg-blue-950/30 border border-blue-800/60 text-xs flex items-center justify-between">
+                      <span className="text-neutral-400 font-medium">Repuesto que se registrará:</span>
+                      <strong className="text-blue-300 font-heading font-black uppercase">
+                        {usadoPieza} - {usadoVehiculo}
+                      </strong>
+                    </div>
+                  )}
                 </div>
-              </div>
+              )}
 
               {/* Cantidad y Fecha */}
               <div className="grid grid-cols-2 gap-3">
@@ -1404,21 +1528,8 @@ export const StockManager = ({
                 </div>
               </div>
 
-              {/* Vehículo / Modelo y Patente */}
+              {/* Patente y Cliente (Opcionales para seguimiento) */}
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-heading font-bold uppercase text-neutral-400 mb-1">
-                    Vehículo / Modelo (Ej: Peugeot 206)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Ej: Peugeot 206, Gol Trend..."
-                    value={usadoVehiculo}
-                    onChange={(e) => setUsadoVehiculo(e.target.value)}
-                    className="w-full bg-neutral-950 border border-neutral-800 focus:border-blue-600 focus:outline-none rounded-lg px-3 py-2 text-xs text-white"
-                  />
-                </div>
-
                 <div>
                   <label className="block text-[11px] font-heading font-bold uppercase text-neutral-400 mb-1">
                     Patente (Opcional)
@@ -1431,10 +1542,7 @@ export const StockManager = ({
                     className="w-full bg-neutral-950 border border-neutral-800 focus:border-blue-600 focus:outline-none rounded-lg px-3 py-2 text-xs text-white uppercase font-mono"
                   />
                 </div>
-              </div>
 
-              {/* Cliente y Notas */}
-              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] font-heading font-bold uppercase text-neutral-400 mb-1">
                     Cliente (Opcional)
@@ -1447,19 +1555,19 @@ export const StockManager = ({
                     className="w-full bg-neutral-950 border border-neutral-800 focus:border-blue-600 focus:outline-none rounded-lg px-3 py-2 text-xs text-white"
                   />
                 </div>
+              </div>
 
-                <div>
-                  <label className="block text-[11px] font-heading font-bold uppercase text-neutral-400 mb-1">
-                    Observaciones / Notas
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Ej: Lado izquierdo / Rótula con juego"
-                    value={usadoObservaciones}
-                    onChange={(e) => setUsadoObservaciones(e.target.value)}
-                    className="w-full bg-neutral-950 border border-neutral-800 focus:border-blue-600 focus:outline-none rounded-lg px-3 py-2 text-xs text-white"
-                  />
-                </div>
+              <div>
+                <label className="block text-[11px] font-heading font-bold uppercase text-neutral-400 mb-1">
+                  Observaciones / Notas
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ej: Lado izquierdo / Rótula con juego"
+                  value={usadoObservaciones}
+                  onChange={(e) => setUsadoObservaciones(e.target.value)}
+                  className="w-full bg-neutral-950 border border-neutral-800 focus:border-blue-600 focus:outline-none rounded-lg px-3 py-2 text-xs text-white"
+                />
               </div>
 
               <div className="flex items-center justify-end gap-3 pt-3 border-t border-neutral-800">
@@ -1524,7 +1632,8 @@ export const StockManager = ({
                 onClick={() => {
                   setCompraModoPieza('nueva');
                   setCompraItemId('');
-                  setCompraPiezaNombre('');
+                  setCompraPieza(REPUESTOS_TALLER_PIEZAS[0] || 'RÓTULA DE SUSPENSIÓN');
+                  setCompraVehiculo('Peugeot 206');
                 }}
                 className={`py-2 rounded text-xs font-heading font-bold uppercase transition-all cursor-pointer ${
                   compraModoPieza === 'nueva'
@@ -1540,13 +1649,13 @@ export const StockManager = ({
               {compraModoPieza === 'existente' && stockList.length > 0 ? (
                 <div>
                   <label className="block text-[11px] font-heading font-bold uppercase text-neutral-400 mb-1">
-                    Seleccionar Repuesto a Reponer *
+                    Seleccionar Repuesto a Reponer (Menú Desplegable) *
                   </label>
                   <select
                     value={compraItemId}
                     onChange={(e) => handleSeleccionarItemExistente(e.target.value)}
                     required
-                    className="w-full bg-neutral-950 border border-neutral-800 text-xs text-white rounded-lg px-3 py-2.5 font-bold"
+                    className="w-full bg-neutral-950 border border-neutral-800 text-xs text-white rounded-lg px-3 py-2.5 font-bold focus:border-emerald-500 focus:outline-none"
                   >
                     <option value="">-- Seleccionar pieza --</option>
                     {stockList.map((item) => (
@@ -1560,48 +1669,72 @@ export const StockManager = ({
                 <div className="space-y-3">
                   <div>
                     <label className="block text-[11px] font-heading font-bold uppercase text-neutral-400 mb-1">
-                      Nombre del Repuesto Comprado *
+                      1. Pieza / Repuesto (Menú Desplegable) *
                     </label>
-                    <input
-                      type="text"
+                    <select
+                      value={compraPieza}
+                      onChange={(e) => setCompraPieza(e.target.value)}
                       required
-                      placeholder="Ej: RÓTULAS PEUGEOT 206, BIELETAS BORA..."
-                      value={compraPiezaNombre}
-                      onChange={(e) => setCompraPiezaNombre(e.target.value)}
-                      className="w-full bg-neutral-950 border border-neutral-800 focus:border-emerald-500 focus:outline-none rounded-lg px-3 py-2 text-xs text-white uppercase font-bold"
-                    />
+                      className="w-full bg-neutral-950 border border-neutral-800 text-xs text-white rounded-lg px-3 py-2.5 font-bold focus:border-emerald-500 focus:outline-none"
+                    >
+                      <option value="">-- Seleccionar Repuesto Estándar --</option>
+                      {REPUESTOS_TALLER_PIEZAS.map((p) => (
+                        <option key={p} value={p}>
+                          🔩 {p}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[11px] font-heading font-bold uppercase text-neutral-400 mb-1">
-                        Vehículo / Compatibilidad
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="Ej: Peugeot 206 / Multimarca"
-                        value={compraVehiculo}
-                        onChange={(e) => setCompraVehiculo(e.target.value)}
-                        className="w-full bg-neutral-950 border border-neutral-800 focus:border-emerald-500 focus:outline-none rounded-lg px-3 py-2 text-xs text-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-heading font-bold uppercase text-neutral-400 mb-1">
-                        Categoría
-                      </label>
-                      <select
-                        value={compraCategoria}
-                        onChange={(e) => setCompraCategoria(e.target.value)}
-                        className="w-full bg-neutral-950 border border-neutral-800 text-xs text-white rounded-lg px-3 py-2"
-                      >
-                        <option value="Tren Delantero / Suspensión">Tren Delantero / Suspensión</option>
-                        <option value="Frenos">Frenos</option>
-                        <option value="Caja de Dirección">Caja de Dirección</option>
-                        <option value="Amortiguadores">Amortiguadores</option>
-                        <option value="Otros Repuestos">Otros Repuestos</option>
-                      </select>
-                    </div>
+                  <div>
+                    <label className="block text-[11px] font-heading font-bold uppercase text-neutral-400 mb-1">
+                      2. Vehículo / Auto (Menú Desplegable) *
+                    </label>
+                    <select
+                      value={compraVehiculo}
+                      onChange={(e) => setCompraVehiculo(e.target.value)}
+                      required
+                      className="w-full bg-neutral-950 border border-neutral-800 text-xs text-white rounded-lg px-3 py-2.5 font-bold focus:border-emerald-500 focus:outline-none"
+                    >
+                      <option value="">-- Seleccionar Marca y Modelo de Argentina --</option>
+                      {VEHICULOS_POR_MARCA.map((grupo) => (
+                        <optgroup key={grupo.marca} label={`🚗 ${grupo.marca}`}>
+                          {grupo.modelos.map((m) => (
+                            <option key={m} value={m}>
+                              {m}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </select>
                   </div>
+
+                  <div>
+                    <label className="block text-[11px] font-heading font-bold uppercase text-neutral-400 mb-1">
+                      3. Categoría (Menú Desplegable)
+                    </label>
+                    <select
+                      value={compraCategoria}
+                      onChange={(e) => setCompraCategoria(e.target.value)}
+                      className="w-full bg-neutral-950 border border-neutral-800 text-xs text-white rounded-lg px-3 py-2 focus:border-emerald-500 focus:outline-none"
+                    >
+                      <option value="Tren Delantero / Suspensión">Tren Delantero / Suspensión</option>
+                      <option value="Frenos">Frenos</option>
+                      <option value="Caja de Dirección">Caja de Dirección</option>
+                      <option value="Amortiguadores">Amortiguadores</option>
+                      <option value="Otros Repuestos">Otros Repuestos</option>
+                    </select>
+                  </div>
+
+                  {/* Previsualización del nombre unificado */}
+                  {compraPieza && compraVehiculo && (
+                    <div className="p-2.5 rounded-lg bg-emerald-950/30 border border-emerald-800/60 text-xs flex items-center justify-between">
+                      <span className="text-neutral-400 font-medium">Nombre que se guardará en Stock:</span>
+                      <strong className="text-emerald-300 font-heading font-black uppercase">
+                        {compraPieza} - {compraVehiculo}
+                      </strong>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1755,53 +1888,73 @@ export const StockManager = ({
             </div>
 
             <form onSubmit={handleGuardarItemCatalogo} className="space-y-4">
-              {!itemEnEdicion && (
-                <div>
-                  <label className="block text-[11px] font-heading font-bold uppercase text-neutral-400 mb-1">
-                    ⚡ Selección Rápida de Tren Delantero
-                  </label>
-                  <select
-                    onChange={(e) => {
-                      if (e.target.value) setNombreItem(e.target.value);
-                    }}
-                    className="w-full bg-neutral-950 border border-neutral-800 text-xs text-white rounded-lg px-3 py-2 font-medium"
-                  >
-                    <option value="">-- Elegir de la lista de piezas comunes --</option>
-                    {REPUESTOS_TALLER_PIEZAS.map((p) => (
-                      <option key={p} value={p}>
-                        {p}
-                      </option>
-                    ))}
-                  </select>
+              <div>
+                <label className="block text-[11px] font-heading font-bold uppercase text-neutral-400 mb-1">
+                  1. Pieza / Repuesto (Menú Desplegable) *
+                </label>
+                <select
+                  value={itemPieza}
+                  onChange={(e) => setItemPieza(e.target.value)}
+                  required
+                  className="w-full bg-neutral-950 border border-neutral-800 text-xs text-white rounded-lg px-3 py-2.5 font-bold focus:border-red-600 focus:outline-none"
+                >
+                  <option value="">-- Seleccionar Repuesto Estándar --</option>
+                  {REPUESTOS_TALLER_PIEZAS.map((p) => (
+                    <option key={p} value={p}>
+                      🔩 {p}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-heading font-bold uppercase text-neutral-400 mb-1">
+                  2. Vehículo / Auto (Menú Desplegable) *
+                </label>
+                <select
+                  value={itemVehiculo}
+                  onChange={(e) => setItemVehiculo(e.target.value)}
+                  required
+                  className="w-full bg-neutral-950 border border-neutral-800 text-xs text-white rounded-lg px-3 py-2.5 font-bold focus:border-red-600 focus:outline-none"
+                >
+                  <option value="">-- Seleccionar Marca y Modelo de Argentina --</option>
+                  {VEHICULOS_POR_MARCA.map((grupo) => (
+                    <optgroup key={grupo.marca} label={`🚗 ${grupo.marca}`}>
+                      {grupo.modelos.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-heading font-bold uppercase text-neutral-400 mb-1">
+                  3. Categoría (Menú Desplegable)
+                </label>
+                <select
+                  value={categoriaItem}
+                  onChange={(e) => setCategoriaItem(e.target.value)}
+                  className="w-full bg-neutral-950 border border-neutral-800 text-xs text-white rounded-lg px-3 py-2 focus:border-red-600 focus:outline-none"
+                >
+                  <option value="Tren Delantero / Suspensión">Tren Delantero / Suspensión</option>
+                  <option value="Frenos">Frenos</option>
+                  <option value="Caja de Dirección">Caja de Dirección</option>
+                  <option value="Amortiguadores">Amortiguadores</option>
+                  <option value="Otros Repuestos">Otros Repuestos</option>
+                </select>
+              </div>
+
+              {itemPieza && itemVehiculo && (
+                <div className="p-2.5 rounded-lg bg-neutral-900 border border-neutral-800 text-xs flex items-center justify-between">
+                  <span className="text-neutral-400 font-medium">Pieza Unificada:</span>
+                  <strong className="text-red-400 font-heading font-black uppercase">
+                    {itemPieza} - {itemVehiculo}
+                  </strong>
                 </div>
               )}
-
-              <div>
-                <label className="block text-[11px] font-heading font-bold uppercase text-neutral-400 mb-1">
-                  Nombre de la Pieza / Repuesto *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ej: EXTREMO DE DIRECCIÓN, BIELETA, RÓTULA..."
-                  value={nombreItem}
-                  onChange={(e) => setNombreItem(e.target.value)}
-                  className="w-full bg-neutral-950 border border-neutral-800 focus:border-red-600 focus:outline-none rounded-lg px-3 py-2 text-xs text-white uppercase font-bold"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-heading font-bold uppercase text-neutral-400 mb-1">
-                  Vehículo o Compatibilidad
-                </label>
-                <input
-                  type="text"
-                  placeholder="Ej: Peugeot 206 / Multimarca"
-                  value={vehiculoCompatibilidadItem}
-                  onChange={(e) => setVehiculoCompatibilidadItem(e.target.value)}
-                  className="w-full bg-neutral-950 border border-neutral-800 focus:border-red-600 focus:outline-none rounded-lg px-3 py-2 text-xs text-white"
-                />
-              </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>

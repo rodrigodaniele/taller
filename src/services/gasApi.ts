@@ -600,14 +600,33 @@ export const gasApi = {
 
       repuestos.forEach((rep) => {
         const cant = Number(rep.cantidad) || 1;
-        const nombreNorm = rep.descripcion.trim().toUpperCase();
+        const descTrim = rep.descripcion.trim();
+        const vehTrim = (vehiculoModelo || '').trim();
+        const claveUnificada = vehTrim ? `${descTrim} - ${vehTrim}` : descTrim;
+        const targetFull = claveUnificada.toUpperCase();
+        const targetDesc = descTrim.toUpperCase();
+        const targetVeh = vehTrim.toUpperCase();
 
-        let stockItem = list.find(
-          (x) =>
-            x.nombre.trim().toUpperCase() === nombreNorm ||
-            nombreNorm.includes(x.nombre.trim().toUpperCase()) ||
-            x.nombre.trim().toUpperCase().includes(nombreNorm)
-        );
+        let stockItem = list.find((x) => {
+          const xNom = x.nombre.trim().toUpperCase();
+          const xVeh = (x.vehiculoCompatibilidad || '').trim().toUpperCase();
+
+          // 1. Coincidencia exacta con la clave unificada ("RÓTULA DE SUSPENSIÓN - PEUGEOT 206")
+          if (xNom === targetFull) return true;
+
+          // 2. Coincidencia por descripción y compatibilidad
+          if (xNom === targetDesc && targetVeh && (xVeh === targetVeh || xNom.includes(targetVeh))) return true;
+
+          // 3. Coincidencia si el nombre contiene la pieza y el auto
+          if (xNom.includes(targetDesc) && targetVeh && (xNom.includes(targetVeh) || xVeh.includes(targetVeh))) return true;
+
+          // 4. Coincidencia por descripción base directa
+          if (xNom === targetDesc) return true;
+
+          return false;
+        });
+
+        const nombreFinalPieza = stockItem ? stockItem.nombre : claveUnificada;
 
         if (stockItem) {
           // Si tiene stock físico disponible, se descuenta 1 (o la cantidad usada)
@@ -618,12 +637,12 @@ export const gasApi = {
           stockItem.totalInstalados = (Number(stockItem.totalInstalados) || 0) + cant;
           stockItem.ultimoMovimiento = fechaFinal;
         } else {
-          // Registrar en catálogo para estadísticas de rotación futura
+          // Registrar en catálogo con formato estandarizado
           const nuevoItem: ItemStock = {
             id: 'STOCK-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
-            nombre: rep.descripcion.trim(),
+            nombre: claveUnificada,
             categoria: 'Tren Delantero / Suspensión',
-            vehiculoCompatibilidad: vehiculoModelo || 'Multimarca',
+            vehiculoCompatibilidad: vehTrim || 'Multimarca',
             stockActual: 0,
             stockMinimo: 2,
             costoUnitario: 0,
@@ -638,9 +657,9 @@ export const gasApi = {
         const nuevoUso: RepuestoUsado = {
           id: 'USO-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
           fecha: fechaFinal,
-          repuestoNombre: rep.descripcion.trim(),
+          repuestoNombre: nombreFinalPieza,
           cantidad: cant,
-          vehiculo: vehiculoModelo || '',
+          vehiculo: vehTrim || '',
           patente: meta?.patente || '',
           cliente: meta?.clienteNombre || '',
           origen: 'facturacion',
