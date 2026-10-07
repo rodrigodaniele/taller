@@ -274,7 +274,8 @@ export const ClientDashboard = ({
       if (
         e.key === 'taller_presupuestos_v1' ||
         e.key === 'taller_turnos_atendidos_v1' ||
-        e.key === 'taller_turnos_cancelados_v1'
+        e.key === 'taller_turnos_cancelados_v1' ||
+        e.key === 'lacasadeladireccion_turnos'
       ) {
         loadClientPresupuestos(true);
         loadClientTurnos();
@@ -285,30 +286,36 @@ export const ClientDashboard = ({
     // 3. Evento interno personalizado
     const handleCustomSync = () => {
       loadClientPresupuestos(true);
+      loadClientTurnos();
     };
     window.addEventListener('taller_presupuesto_sync', handleCustomSync);
+    window.addEventListener('taller_turnos_sync', handleCustomSync);
 
     // 4. Evento de foco/visibilidad: si el cliente vuelve a la pestaña, refrescar al segundo
     const handleFocus = () => {
       loadClientPresupuestos(true);
+      loadClientTurnos();
     };
     window.addEventListener('focus', handleFocus);
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
         loadClientPresupuestos(true);
+        loadClientTurnos();
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);
 
-    // 5. Polling en segundo plano cada 7 segundos para sincronización entre distintos dispositivos (ej. PC y celular)
+    // 5. Polling en segundo plano cada 7 segundos para sincronización de turnos y presupuestos entre distintos dispositivos
     const interval = setInterval(() => {
       loadClientPresupuestos(true);
+      loadClientTurnos();
     }, 7000);
 
     return () => {
       if (bc) bc.close();
       window.removeEventListener('storage', handleStorage);
       window.removeEventListener('taller_presupuesto_sync', handleCustomSync);
+      window.removeEventListener('taller_turnos_sync', handleCustomSync);
       window.removeEventListener('focus', handleFocus);
       document.removeEventListener('visibilitychange', handleVisibility);
       clearInterval(interval);

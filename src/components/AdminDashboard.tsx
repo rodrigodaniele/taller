@@ -551,9 +551,12 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
 
     setSavingWork(true);
     try {
+      const cleanTurnoFecha = String(selectedTurno.fecha || '').replace(/^'/, '').trim();
+      const fechaExactaTrabajo = cleanTurnoFecha ? normalizarFechaArgentina(cleanTurnoFecha) : getFechaHoyArgentina();
+
       const payload: DatosTrabajoAdmin = {
         email: selectedTurno.email,
-        fecha: selectedTurno.fecha,
+        fecha: fechaExactaTrabajo,
         horario: selectedTurno.horario,
         patente: selectedTurno.patente,
         kilometraje,
@@ -563,12 +566,11 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
 
       const res = await gasApi.saveAdminWork(payload);
 
-      // Auto-register in contabilidad if checked
+      // Auto-register in contabilidad if checked con la misma fecha exacta
       if (autoRegistrarContabilidad && Number(montoCobrado) > 0) {
-        const cleanFecha = String(selectedTurno.fecha).replace("'", '');
         const movimientoItem: MovimientoContable = {
           id: 'MOV-' + Date.now(),
-          fecha: cleanFecha ? normalizarFechaArgentina(cleanFecha) : getFechaHoyArgentina(),
+          fecha: fechaExactaTrabajo,
           tipo: 'ingreso',
           concepto: `Reparación: ${trabajoFinal.substring(0, 50)}`,
           categoria: 'Mano de Obra / Taller',
@@ -585,7 +587,7 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
         setTurnos((prev) => prev.filter((t) => (t.patente || '').trim().toUpperCase() !== selectedTurno.patente.trim().toUpperCase()));
         gasApi.marcarTurnoAtendido(selectedTurno.patente).catch(() => {});
 
-        // Impactar en rotación de stock de repuestos utilizados en el taller
+        // Impactar en rotación de stock de repuestos utilizados en el taller con la misma fecha exacta
         try {
           const repuestoItems: ItemPresupuesto[] = selectedServicios.map((s, idx) => ({
             id: `ITEM-SRV-${Date.now()}-${idx}`,
@@ -595,7 +597,7 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
             precioUnitario: 0,
             subtotal: 0,
           }));
-          gasApi.actualizarRotacionYDescontarStock(repuestoItems, selectedTurno.patente);
+          gasApi.actualizarRotacionYDescontarStock(repuestoItems, selectedTurno.patente, fechaExactaTrabajo);
           fetchStock(true);
         } catch {}
 
@@ -727,6 +729,53 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
     }
   };
 
+  // Autocompletar datos del cliente si el correo ya existe en turnos, presupuestos o Google Sheets
+  const handleMostradorEmailChange = async (val: string) => {
+    setMostradorEmail(val);
+    const cleanEmail = val.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@')) return;
+
+    // 1. Buscar en turnos cargados
+    const matchTurno = turnos.find((t) => (t.email || '').trim().toLowerCase() === cleanEmail);
+    if (matchTurno) {
+      if (matchTurno.nombre) setMostradorNombre(matchTurno.nombre);
+      if (matchTurno.telefono) setMostradorTelefono(matchTurno.telefono);
+      if (matchTurno.patente && !mostradorPatente) setMostradorPatente(matchTurno.patente.toUpperCase());
+      return;
+    }
+
+    // 2. Buscar en presupuestos cargados
+    const matchPres = presupuestos.find((p) => (p.clienteEmail || '').trim().toLowerCase() === cleanEmail);
+    if (matchPres) {
+      if (matchPres.clienteNombre) setMostradorNombre(matchPres.clienteNombre);
+      if (matchPres.clienteTelefono) setMostradorTelefono(matchPres.clienteTelefono);
+      if (matchPres.patente && !mostradorPatente) setMostradorPatente(matchPres.patente.toUpperCase());
+      return;
+    }
+
+    // 3. Buscar en localStorage de usuario activo
+    try {
+      const uStr = localStorage.getItem('lacasadeladireccion_user');
+      if (uStr) {
+        const u = JSON.parse(uStr);
+        if ((u.email || '').trim().toLowerCase() === cleanEmail) {
+          if (u.nombre) setMostradorNombre(u.nombre);
+          if (u.telefono) setMostradorTelefono(u.telefono);
+          return;
+        }
+      }
+    } catch {}
+
+    // 4. Buscar en Google Sheets vía API
+    try {
+      const res = await gasApi.buscarClientePorEmail(cleanEmail);
+      if (res && res.usuario) {
+        if (res.usuario.nombre) setMostradorNombre(res.usuario.nombre);
+        if (res.usuario.telefono) setMostradorTelefono(res.usuario.telefono);
+      }
+    } catch {}
+  };
+
   // Save new turno from mostrador / presencial & auto-create user with password 123456
   const handleGuardarTurnoMostrador = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -756,40 +805,46 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
     const cleanEmail = mostradorEmail.trim().toLowerCase();
     const cleanNombre = mostradorNombre.trim();
     const cleanTelefono = mostradorTelefono.trim();
+    const cleanFecha = normalizarFechaArgentina(mostradorFecha);
 
     const nuevoTurnoAdmin: TurnoAdmin = {
       patente: cleanPatente,
-      fecha: mostradorFecha,
+      fecha: cleanFecha,
       horario: mostradorHorario,
       email: cleanEmail,
       nombre: cleanNombre,
       telefono: cleanTelefono,
     };
 
+    const yaExiste = turnos.some((t) => (t.email || '').toLowerCase().trim() === cleanEmail) ||
+                     presupuestos.some((p) => (p.clienteEmail || '').toLowerCase().trim() === cleanEmail);
+
     try {
-      // 1. Registrar al usuario usando 'accion: registrar' (compatible con la versión actual de Google Apps Script)
-      try {
-        await gasApi.register(cleanNombre, cleanTelefono, cleanEmail, '123456');
-      } catch (errReg) {
-        console.warn('Registro de usuario vía register:', errReg);
+      // 1. Si no existe previamente, registrar al usuario nuevo con clave 123456
+      if (!yaExiste) {
+        try {
+          await gasApi.register(cleanNombre, cleanTelefono, cleanEmail, '123456');
+        } catch (errReg) {
+          console.warn('Registro de usuario vía register:', errReg);
+        }
       }
 
       // 2. Guardar en Google Sheets (Hoja "Turnos" y asegura datos en "Usuarios")
       await gasApi.createTurnoMostrador({
         patente: cleanPatente,
-        fecha: mostradorFecha,
+        fecha: cleanFecha,
         horario: mostradorHorario,
         nombre: cleanNombre,
         telefono: cleanTelefono,
         email: cleanEmail,
       });
 
-      setTurnos((prev) => [nuevoTurnoAdmin, ...prev.filter((t) => t.patente !== cleanPatente || t.fecha !== mostradorFecha)]);
+      setTurnos((prev) => [nuevoTurnoAdmin, ...prev.filter((t) => t.patente !== cleanPatente || t.fecha !== cleanFecha)]);
 
       onShowToast(
         'success',
-        '¡Turno agendado y Usuario creado!',
-        `Vehículo ${cleanPatente} para el ${mostradorFecha} ${mostradorHorario} hs. Usuario registrado con contraseña: 123456.`
+        yaExiste ? '¡Turno agendado para cliente existente!' : '¡Turno agendado y Usuario creado!',
+        `Vehículo ${cleanPatente} para el ${cleanFecha} ${mostradorHorario} hs.${yaExiste ? ' Datos del cliente vinculados.' : ' Usuario registrado con contraseña: 123456.'}`
       );
 
       setShowModalTurnoMostrador(false);
@@ -801,11 +856,11 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
     } catch (err: any) {
       console.warn('Falla en llamada directa a GAS:', err);
       // Fallback local garantizado
-      setTurnos((prev) => [nuevoTurnoAdmin, ...prev.filter((t) => t.patente !== cleanPatente || t.fecha !== mostradorFecha)]);
+      setTurnos((prev) => [nuevoTurnoAdmin, ...prev.filter((t) => t.patente !== cleanPatente || t.fecha !== cleanFecha)]);
       onShowToast(
         'success',
         'Turno agendado en el sistema',
-        `Vehículo ${cleanPatente} cargado con éxito. Usuario creado con contraseña 123456.`
+        `Vehículo ${cleanPatente} cargado con éxito.${yaExiste ? '' : ' Usuario creado con contraseña 123456.'}`
       );
       setShowModalTurnoMostrador(false);
     } finally {
@@ -945,7 +1000,7 @@ function formatearFechaParaAppsScript(val) {
   }
   var s = val.toString().replace(/['"]/g, "").trim();
   // Caso formato Date.toString() ej: "Tue Oct 07 2026 ..."
-  var matchDateStr = s.match(/\b([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})\b/);
+  var matchDateStr = s.match(/\\b([A-Za-z]{3})\\s+(\\d{1,2})\\s+(\\d{4})\\b/);
   if (matchDateStr) {
     var mesesMap = {
       "jan": "01", "feb": "02", "mar": "03", "apr": "04", "may": "05", "jun": "06",
@@ -958,16 +1013,24 @@ function formatearFechaParaAppsScript(val) {
     }
   }
   // Caso DD/MM/AAAA
-  if (/^\d{1,2}\/\d{1,2}\/\d{4}/.test(s)) {
+  if (/^\\d{1,2}\\/\\d{1,2}\\/\\d{4}/.test(s)) {
     var p = s.split("/");
     var d = p[0].length === 1 ? ("0" + p[0]) : p[0];
     var m = p[1].length === 1 ? ("0" + p[1]) : p[1];
     var y = p[2].split(" ")[0].split("T")[0];
     return y + "-" + m + "-" + d;
   }
+  // Caso YYYY-MM-DD o YYYY-M-D
+  if (/^\\d{4}-\\d{1,2}-\\d{1,2}/.test(s)) {
+    var onlyDate = s.split("T")[0].split(" ")[0];
+    var pY = onlyDate.split("-");
+    var mY = pY[1].length === 1 ? ("0" + pY[1]) : pY[1];
+    var dY = pY[2].length === 1 ? ("0" + pY[2]) : pY[2];
+    return pY[0] + "-" + mY + "-" + dY;
+  }
   if (s.indexOf("T") !== -1) {
     var onlyDate = s.split("T")[0];
-    if (/^\d{4}-\d{1,2}-\d{1,2}/.test(onlyDate)) {
+    if (/^\\d{4}-\\d{1,2}-\\d{1,2}/.test(onlyDate)) {
       return onlyDate;
     }
   }
@@ -981,6 +1044,24 @@ function doPost(e) {
     var sheetTurnos = ss.getSheetByName("Turnos") || ss.insertSheet("Turnos");
     var sheetContabilidad = ss.getSheetByName("Contabilidad") || ss.insertSheet("Contabilidad");
     var datos = JSON.parse(e.postData.contents);
+    
+    // --- ACCIÓN: BUSCAR USUARIO POR EMAIL (AUTOCOMPLETAR EN MOSTRADOR) ---
+    if (datos.accion === "buscarUsuarioPorEmail") {
+      var rowsUsuarios = sheetUsuarios ? sheetUsuarios.getDataRange().getValues() : [];
+      var clienteEncontrado = null;
+      var targetEmail = String(datos.email || "").toLowerCase().trim();
+      for (var u = 1; u < rowsUsuarios.length; u++) {
+        if (rowsUsuarios[u][2] && rowsUsuarios[u][2].toString().toLowerCase().trim() === targetEmail) {
+          clienteEncontrado = {
+            nombre: rowsUsuarios[u][0] ? rowsUsuarios[u][0].toString() : "",
+            telefono: rowsUsuarios[u][1] ? rowsUsuarios[u][1].toString() : "",
+            email: rowsUsuarios[u][2] ? rowsUsuarios[u][2].toString() : ""
+          };
+          break;
+        }
+      }
+      return ContentService.createTextOutput(JSON.stringify({ resultado: "ok", usuario: clienteEncontrado })).setMimeType(ContentService.MimeType.JSON);
+    }
     
     // --- ACCIÓN 0: ENVIAR CÓDIGO DE VALIDACIÓN POR CORREO ---
     if (datos.accion === "enviarCodigoVerificacion") {
@@ -1941,7 +2022,7 @@ function actualizarRotacionDesdeTextoAdminSheet(textoTrabajo, patente, fechaMov)
   var partes = String(textoTrabajo).split(" + ");
   var items = [];
   for (var p = 0; p < partes.length; p++) {
-    var nom = partes[p].replace(/\s*\[.*\]/, "").trim();
+    var nom = partes[p].replace(/\\s*\\[.*\\]/, "").trim();
     if (nom) {
       items.push({ tipo: "repuesto", descripcion: nom, cantidad: 1 });
     }
@@ -2004,15 +2085,6 @@ function obtenerHistorialCliente(emailCliente) {
   }
   historialUsuario.reverse();
   return { success: true, historial: historialUsuario };
-}
-
-function doOptions(e) {
-  return ContentService.createTextOutput("")
-                       .setHeaders({
-                         'Access-Control-Allow-Origin': '*',
-                         'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-                         'Access-Control-Allow-Headers': 'Content-Type'
-                       });
 }`;
 
   const copyToClipboard = () => {
@@ -3088,7 +3160,7 @@ function doOptions(e) {
                       required
                       placeholder="cliente@email.com"
                       value={mostradorEmail}
-                      onChange={(e) => setMostradorEmail(e.target.value)}
+                      onChange={(e) => handleMostradorEmailChange(e.target.value)}
                       className="w-full bg-[#111] border border-neutral-800 focus:border-red-600 focus:outline-none rounded-lg px-3 py-2 text-sm text-white"
                     />
                   </div>

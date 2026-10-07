@@ -108,10 +108,25 @@ export const gasApi = {
   },
 
   async saveAdminWork(datosTrabajo: DatosTrabajoAdmin): Promise<{ success: boolean; error?: string }> {
+    const payload = {
+      ...datosTrabajo,
+      fecha: datosTrabajo.fecha ? normalizarFechaArgentina(datosTrabajo.fecha) : getFechaHoyArgentina(),
+    };
     return callGasApi({
       accion: 'guardarTrabajoAdmin',
-      datosTrabajo,
+      datosTrabajo: payload,
     });
+  },
+
+  async buscarClientePorEmail(email: string): Promise<{ success: boolean; usuario?: { nombre: string; telefono: string; email: string }; error?: string }> {
+    try {
+      return await callGasApi({
+        accion: 'buscarUsuarioPorEmail',
+        email: email.trim().toLowerCase(),
+      });
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
   },
 
   async marcarTurnoAtendido(patente: string): Promise<{ success: boolean; error?: string }> {
@@ -341,9 +356,13 @@ export const gasApi = {
   },
 
   async facturarPresupuestoYArchivar(presupuesto: any): Promise<{ success: boolean; error?: string }> {
+    const p = {
+      ...presupuesto,
+      fecha: presupuesto.fecha ? normalizarFechaArgentina(presupuesto.fecha) : getFechaHoyArgentina(),
+    };
     return callGasApi({
       accion: 'facturarPresupuestoYArchivar',
-      presupuesto,
+      presupuesto: p,
     });
   },
 

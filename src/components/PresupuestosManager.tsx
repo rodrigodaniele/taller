@@ -133,6 +133,7 @@ export const PresupuestosManager = ({
   const [vehiculoModelo, setVehiculoModelo] = useState('');
   const [modoVehiculoOtro, setModoVehiculoOtro] = useState(false);
   const [patente, setPatente] = useState('');
+  const [fechaPresupuesto, setFechaPresupuesto] = useState(() => getFechaHoyArgentina());
   const [kilometraje, setKilometraje] = useState('');
   const [validezDias, setValidezDias] = useState(7);
   const [observaciones, setObservaciones] = useState('Presupuesto válido por 7 días. Precios en efectivo o transferencia bancaria. Mano de obra garantizada.');
@@ -205,6 +206,8 @@ export const PresupuestosManager = ({
       setClienteNombre(turno.nombre || '');
       setClienteTelefono(turno.telefono || '');
       setVehiculoModelo('');
+      const fNorm = turno.fecha ? normalizarFechaArgentina(turno.fecha) : getFechaHoyArgentina();
+      setFechaPresupuesto(fNorm);
       setSelectedTurnoRef(`${turno.patente} (${formatearFechaArgentina(turno.fecha)} ${formatearHorario(turno.horario)}hs)`);
     } else {
       setPatente('');
@@ -212,6 +215,7 @@ export const PresupuestosManager = ({
       setClienteNombre('');
       setClienteTelefono('');
       setVehiculoModelo('');
+      setFechaPresupuesto(getFechaHoyArgentina());
       setSelectedTurnoRef('');
     }
     setModoVehiculoOtro(false);
@@ -238,6 +242,7 @@ export const PresupuestosManager = ({
   const editarPresupuesto = (p: Presupuesto) => {
     setPresupuestoEnEdicion(p);
     setPatente(p.patente);
+    setFechaPresupuesto(p.fecha ? normalizarFechaArgentina(p.fecha) : getFechaHoyArgentina());
     setClienteNombre(p.clienteNombre);
     setClienteTelefono(p.clienteTelefono);
     setClienteEmail(p.clienteEmail || '');
@@ -312,7 +317,9 @@ export const PresupuestosManager = ({
       setClienteEmail(t.email || '');
       setClienteNombre(t.nombre || '');
       setClienteTelefono(t.telefono || '');
-      setSelectedTurnoRef(`${t.patente} (${t.fecha} ${t.horario}hs)`);
+      const fNorm = t.fecha ? normalizarFechaArgentina(t.fecha) : getFechaHoyArgentina();
+      setFechaPresupuesto(fNorm);
+      setSelectedTurnoRef(`${t.patente} (${formatearFechaArgentina(t.fecha)} ${formatearHorario(t.horario)}hs)`);
     } else {
       setSelectedTurnoRef('');
     }
@@ -330,11 +337,13 @@ export const PresupuestosManager = ({
       return;
     }
 
+    const fechaFinalPresupuesto = fechaPresupuesto ? normalizarFechaArgentina(fechaPresupuesto) : getFechaHoyArgentina();
     let presupuestoAGuardar: Presupuesto;
 
     if (presupuestoEnEdicion) {
       presupuestoAGuardar = {
         ...presupuestoEnEdicion,
+        fecha: fechaFinalPresupuesto,
         clienteNombre: clienteNombre.trim() || 'Cliente Mostrador',
         clienteTelefono: clienteTelefono.trim(),
         clienteEmail: clienteEmail.trim(),
@@ -355,18 +364,11 @@ export const PresupuestosManager = ({
       onShowToast('success', 'Presupuesto actualizado', `Guardando ${presupuestoAGuardar.numero} en Google Sheets...`);
     } else {
       const nextNum = `P-${1000 + presupuestos.length + 1}`;
-      let fechaPresupuesto = getFechaHoyArgentina();
-      if (selectedTurnoRef) {
-        const matchIso = selectedTurnoRef.match(/\b(\d{4}-\d{1,2}-\d{1,2})\b/);
-        const matchArg = selectedTurnoRef.match(/\b(\d{1,2}\/\d{1,2}\/\d{4})\b/);
-        if (matchIso) fechaPresupuesto = matchIso[1];
-        else if (matchArg) fechaPresupuesto = normalizarFechaArgentina(matchArg[1]);
-      }
 
       presupuestoAGuardar = {
         id: `pres-${Date.now()}`,
         numero: nextNum,
-        fecha: fechaPresupuesto,
+        fecha: fechaFinalPresupuesto,
         validezDias,
         clienteNombre: clienteNombre.trim() || 'Cliente Mostrador',
         clienteTelefono: clienteTelefono.trim(),
@@ -442,14 +444,15 @@ export const PresupuestosManager = ({
 
       // 3. Registrar automáticamente en la hoja Detalles_Turnos y pasar turno a Atendido en Google Sheets
       try {
-        gasApi.facturarPresupuestoYArchivar(p).catch((err) => console.warn(err));
+        const pConFechaNormalizada = { ...p, fecha: fechaPresupuesto };
+        gasApi.facturarPresupuestoYArchivar(pConFechaNormalizada).catch((err) => console.warn(err));
         gasApi.marcarTurnoAtendido(p.patente).catch((err) => console.warn(err));
       } catch (err) {}
 
-      // 4. Actualizar radar de rotación histórica de repuestos y descontar del inventario si hay stock físico
+      // 4. Actualizar radar de rotación histórica de repuestos y descontar del inventario si hay stock físico con la misma fecha exacta
       try {
         if (Array.isArray(p.items) && p.items.length > 0) {
-          gasApi.actualizarRotacionYDescontarStock(p.items, p.vehiculoModelo || p.patente, p.fecha);
+          gasApi.actualizarRotacionYDescontarStock(p.items, p.vehiculoModelo || p.patente, fechaPresupuesto);
         }
       } catch (err) {}
 
@@ -1304,7 +1307,7 @@ export const PresupuestosManager = ({
                   <h4 className="text-xs font-heading font-black uppercase tracking-wider text-neutral-300 border-b border-neutral-800 pb-1">
                     1. Vehículo y Cliente
                   </h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                     <div>
                       <label className="block text-[11px] font-heading font-bold uppercase text-neutral-400 mb-1">
                         Patente / Dominio *
@@ -1316,6 +1319,19 @@ export const PresupuestosManager = ({
                         value={patente}
                         onChange={(e) => setPatente(e.target.value.toUpperCase())}
                         className="w-full bg-[#111] border border-neutral-800 focus:border-red-600 focus:outline-none rounded-lg px-3 py-2 text-xs font-mono font-bold text-white uppercase tracking-wider"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-heading font-bold uppercase text-neutral-400 mb-1">
+                        Fecha Presupuesto / Turno
+                      </label>
+                      <input
+                        type="date"
+                        required
+                        value={fechaPresupuesto}
+                        onChange={(e) => setFechaPresupuesto(e.target.value)}
+                        className="w-full bg-[#111] border border-neutral-800 focus:border-red-600 focus:outline-none rounded-lg px-3 py-2 text-xs font-mono text-white"
                       />
                     </div>
 

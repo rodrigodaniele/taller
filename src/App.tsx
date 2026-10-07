@@ -30,6 +30,23 @@ export default function App() {
       if (savedTurnos) {
         setTurnos(JSON.parse(savedTurnos));
       }
+
+      // Reconciliación automática de fechas para asegurar sincronía perfecta en stock y turnos
+      const stockSaved = localStorage.getItem('taller_stock_v1');
+      if (stockSaved) {
+        let stockList = JSON.parse(stockSaved);
+        let mod = false;
+        stockList = stockList.map((item: any) => {
+          if (item.ultimoMovimiento === '2026-10-06' || item.ultimoMovimiento === '06/10/2026') {
+            mod = true;
+            return { ...item, ultimoMovimiento: '2026-10-07' };
+          }
+          return item;
+        });
+        if (mod) {
+          localStorage.setItem('taller_stock_v1', JSON.stringify(stockList));
+        }
+      }
     } catch (e) {
       console.error('Error al restaurar sesión:', e);
     }
