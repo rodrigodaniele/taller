@@ -78,17 +78,59 @@ const marcarTurnoAtendidoLocal = (patente: string) => {
   } catch {}
 };
 
-const marcarTurnoCanceladoLocal = (patente: string) => {
+const marcarTurnoCanceladoLocal = (patente: string, fecha?: string) => {
   try {
     const clean = patente.toUpperCase().trim();
     if (!clean) return;
     const current = getTurnosCanceladosSet();
-    current.add(clean);
+    const key = fecha ? `${clean}_${normalizarFechaArgentina(fecha)}` : clean;
+    current.add(key);
     localStorage.setItem('taller_turnos_cancelados_v1', JSON.stringify(Array.from(current)));
     if (typeof BroadcastChannel !== 'undefined') {
       try {
         const bc = new BroadcastChannel('lacasadeladireccion_realtime');
-        bc.postMessage({ type: 'TURNO_CANCELADO', patente: clean });
+        bc.postMessage({ type: 'TURNO_CANCELADO', patente: clean, fecha: fecha ? normalizarFechaArgentina(fecha) : undefined });
+        bc.close();
+      } catch {}
+    }
+  } catch {}
+};
+
+const removerTurnoCanceladoLocal = (patente: string, fecha?: string) => {
+  try {
+    const clean = patente.toUpperCase().trim();
+    if (!clean) return;
+    const current = getTurnosCanceladosSet();
+    const fechaNorm = fecha ? normalizarFechaArgentina(fecha) : '';
+    let changed = false;
+
+    current.forEach((item) => {
+      if (item === clean || (fechaNorm && item === `${clean}_${fechaNorm}`) || (!fecha && item.startsWith(`${clean}_`))) {
+        current.delete(item);
+        changed = true;
+      }
+    });
+
+    if (changed) {
+      localStorage.setItem('taller_turnos_cancelados_v1', JSON.stringify(Array.from(current)));
+    }
+
+    const atendidos = getTurnosAtendidosSet();
+    let changedAtendidos = false;
+    atendidos.forEach((item) => {
+      if (item === clean || (fechaNorm && item === `${clean}_${fechaNorm}`) || (!fecha && item.startsWith(`${clean}_`))) {
+        atendidos.delete(item);
+        changedAtendidos = true;
+      }
+    });
+    if (changedAtendidos) {
+      localStorage.setItem('taller_turnos_atendidos_v1', JSON.stringify(Array.from(atendidos)));
+    }
+
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        const bc = new BroadcastChannel('lacasadeladireccion_realtime');
+        bc.postMessage({ type: 'TURNO_REPROGRAMADO', patente: clean });
         bc.close();
       } catch {}
     }
@@ -103,18 +145,41 @@ const filtrarTurnosPendientes = (listaTurnos: TurnoAdmin[], listaPresupuestos: P
       .filter((p) => p.estado === 'facturado')
       .map((p) => (p.patente || '').toUpperCase().trim())
   );
+  const hoyStr = getFechaHoyArgentina();
 
   return listaTurnos.filter((t) => {
     const cleanPat = (t.patente || '').toUpperCase().trim();
     if (!cleanPat) return false;
-    // Si ya fue marcado como atendido localmente
-    if (atendidosSet.has(cleanPat)) return false;
-    // Si ya fue marcado como cancelado localmente
-    if (canceladosSet.has(cleanPat)) return false;
-    // Si el turno viene como 'cancelado' o 'atendido'
-    if (t.estado && ['atendido', 'cancelado'].includes(String(t.estado).toLowerCase().trim())) return false;
-    // Si el vehículo ya tiene un presupuesto facturado (proceso finalizado y pasado a contabilidad)
-    if (patentesFacturadas.has(cleanPat)) return false;
+    const fechaNorm = normalizarFechaArgentina(t.fecha);
+    const keyConFecha = `${cleanPat}_${fechaNorm}`;
+
+    // Si viene explícitamente como cancelado o atendido desde la planilla
+    if (t.estado && ['atendido', 'cancelado'].includes(String(t.estado).toLowerCase().trim())) {
+      return false;
+    }
+
+    // Si fue cancelado este turno específico de esta fecha
+    if (canceladosSet.has(keyConFecha)) {
+      return false;
+    }
+
+    // Si fue atendido este turno específico de esta fecha
+    if (atendidosSet.has(keyConFecha)) {
+      return false;
+    }
+
+    // Si la patente figuraba como cancelada globalmente pero este turno es para hoy o el futuro,
+    // NO se filtra: es una reprogramación válida y debe verse.
+    if (canceladosSet.has(cleanPat) && fechaNorm < hoyStr) {
+      return false;
+    }
+
+    // Si el vehículo fue facturado en el pasado pero ahora tiene un turno nuevo programado para hoy o el futuro,
+    // el turno nuevo DEBE verse
+    if (patentesFacturadas.has(cleanPat) && fechaNorm < hoyStr) {
+      return false;
+    }
+
     return true;
   });
 };
@@ -300,22 +365,22 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
           localStorage.setItem('taller_directorio_clientes_v1', JSON.stringify(listaDirectorio));
         } catch {}
 
-        // Auto-reparación en Google Sheets: si en la planilla Turnos todavía figura como 'Programado'
-        // un vehículo que ya fue facturado, atendido o cancelado por inasistencia, enviamos la orden a Google Sheets
+        // Auto-reparación en Google Sheets: solo si un vehículo ya fue facturado en contabilidad
+        // y tiene un turno antiguo pasado, marcamos como atendido. NUNCA cancelar turnos futuros.
         try {
-          const atendidosSet = getTurnosAtendidosSet();
-          const canceladosSet = getTurnosCanceladosSet();
           const patentesFacturadas = new Set(
             currentPresupuestos
               .filter((p) => p.estado === 'facturado')
               .map((p) => (p.patente || '').toUpperCase().trim())
           );
+          const hoyStr = getFechaHoyArgentina();
           res.turnos.forEach((t) => {
             const cleanP = (t.patente || '').toUpperCase().trim();
             if (!cleanP) return;
-            if (canceladosSet.has(cleanP)) {
-              gasApi.cancelarTurno(cleanP).catch(() => {});
-            } else if (atendidosSet.has(cleanP) || patentesFacturadas.has(cleanP)) {
+            const fechaNorm = normalizarFechaArgentina(t.fecha);
+            // ¡NUNCA cancelar ni auto-cerrar un turno de hoy o del futuro!
+            if (fechaNorm >= hoyStr) return;
+            if (patentesFacturadas.has(cleanP)) {
               gasApi.marcarTurnoAtendido(cleanP).catch(() => {});
             }
           });
@@ -718,12 +783,13 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
   const handleConfirmarCancelarTurno = async () => {
     if (!turnoACancelar) return;
     const pat = (turnoACancelar.patente || '').trim().toUpperCase();
+    const fecha = turnoACancelar.fecha;
     setCancelandoTurno(true);
     try {
-      marcarTurnoCanceladoLocal(pat);
-      setTurnos((prev) => prev.filter((t) => (t.patente || '').trim().toUpperCase() !== pat));
-      await gasApi.cancelarTurno(pat, motivoCancelacion);
-      onShowToast('info', 'Turno cancelado', `El turno de la patente ${pat} fue cancelado exitosamente.`);
+      marcarTurnoCanceladoLocal(pat, fecha);
+      setTurnos((prev) => prev.filter((t) => !( (t.patente || '').trim().toUpperCase() === pat && (!fecha || t.fecha === fecha) )));
+      await gasApi.cancelarTurno(pat, motivoCancelacion, fecha);
+      onShowToast('info', 'Turno cancelado', `El turno de la patente ${pat}${fecha ? ` para el ${fecha}` : ''} fue cancelado.`);
       setTurnoACancelar(null);
     } catch (err: any) {
       console.error(err);
@@ -1112,6 +1178,9 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
         telefono: cleanTelefono,
         patente: cleanPatente,
       };
+      // Desbloquear cualquier marca previa de cancelación para esta patente y fecha
+      removerTurnoCanceladoLocal(cleanPatente, cleanFecha);
+
       setTodosLosClientes((prev) => {
         const next = [...prev.filter((c) => c.email.toLowerCase().trim() !== cleanEmail), nuevoClienteEnDirectorio];
         try {
@@ -1642,7 +1711,7 @@ function doPost(e) {
 
     // --- ACCIÓN 22: CANCELAR TURNO POR INASISTENCIA DEL USUARIO ---
     if (datos.accion === "cancelarTurno") {
-      var resCancelado = pasarTurnoACanceladoPorPatente(datos.patente, datos.motivo);
+      var resCancelado = pasarTurnoACanceladoPorPatente(datos.patente, datos.motivo, datos.fecha);
       return ContentService.createTextOutput(JSON.stringify(resCancelado)).setMimeType(ContentService.MimeType.JSON);
     }
                            
@@ -1755,20 +1824,30 @@ function ejecutarLimpiezaYOrdenamientoCompleto() {
   
   var range = sheetTurnos.getRange(2, 1, lastRow - 1, 5);
   var data = range.getValues();
-  var hoy = new Date(); hoy.setHours(0,0,0,0);
+  var hoyStr = getFechaHoyArgentinaAppsScript();
   
   for (var i = 0; i < data.length; i++) {
     if (data[i][1] && data[i][4].toString().toLowerCase() === "programado") {
-      var fTurno = new Date(data[i][1].toString().replace("'", "") + "T00:00:00");
-      if (fTurno < hoy) data[i][4] = "Atendido";
+      var fTurnoStr = formatearFechaParaAppsScript(data[i][1]);
+      if (fTurnoStr && fTurnoStr < hoyStr) {
+        data[i][4] = "Atendido";
+      }
     }
   }
   
   var futuros = data.filter(function(r) { return r[4].toString().toLowerCase() === "programado"; });
   var pasados = data.filter(function(r) { return r[4].toString().toLowerCase() !== "programado"; });
   
-  futuros.sort(function(a,b) { return new Date(a[1].toString().replace("'","")+"T"+a[2].toString().replace("'","")) - new Date(b[1].toString().replace("'","")+"T"+b[2].toString().replace("'","")); });
-  pasados.sort(function(a,b) { return new Date(b[1].toString().replace("'","")+"T"+b[2].toString().replace("'","")) - new Date(a[1].toString().replace("'","")+"T"+a[2].toString().replace("'","")); });
+  futuros.sort(function(a,b) { 
+    var fa = formatearFechaParaAppsScript(a[1]) + " " + a[2].toString().replace("'","");
+    var fb = formatearFechaParaAppsScript(b[1]) + " " + b[2].toString().replace("'","");
+    return fa.localeCompare(fb);
+  });
+  pasados.sort(function(a,b) { 
+    var fa = formatearFechaParaAppsScript(a[1]) + " " + a[2].toString().replace("'","");
+    var fb = formatearFechaParaAppsScript(b[1]) + " " + b[2].toString().replace("'","");
+    return fb.localeCompare(fa);
+  });
   
   range.setValues(futuros.concat(pasados));
 }
@@ -1805,7 +1884,7 @@ function pasarTurnoAAtendidoPorPatente(patente) {
   return { success: true, actualizados: actualizados };
 }
 
-function pasarTurnoACanceladoPorPatente(patente, motivo) {
+function pasarTurnoACanceladoPorPatente(patente, motivo, fecha) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheetTurnos = ss.getSheetByName("Turnos");
   if (!sheetTurnos) return { success: false, error: "No se encontró hoja Turnos" };
@@ -1816,15 +1895,31 @@ function pasarTurnoACanceladoPorPatente(patente, motivo) {
   var lastRow = sheetTurnos.getLastRow();
   if (lastRow <= 1) return { success: true, actualizados: 0 };
   
+  var fechaTarget = fecha ? formatearFechaParaAppsScript(fecha) : "";
+  var hoyStr = getFechaHoyArgentinaAppsScript();
   var data = sheetTurnos.getDataRange().getValues();
   var actualizados = 0;
   
   for (var i = 1; i < data.length; i++) {
     var patFila = limpiarPatenteParaComparacion(data[i][3]);
     var estFila = data[i][4] ? data[i][4].toString().trim().toLowerCase() : "";
+    var fechaFila = formatearFechaParaAppsScript(data[i][1]);
+    
     if (patFila === target && estFila !== "atendido" && estFila !== "cancelado") {
-      sheetTurnos.getRange(i + 1, 5).setValue("Cancelado");
-      actualizados++;
+      // Si se especificó fecha exacta para cancelar:
+      if (fechaTarget) {
+        if (fechaFila === fechaTarget) {
+          sheetTurnos.getRange(i + 1, 5).setValue("Cancelado");
+          actualizados++;
+          break; // Cancelar solo el turno específico seleccionado
+        }
+      } else {
+        // Si no se envió fecha, cancelar solo si es de hoy o anterior, NUNCA cancelar un turno futuro de mañana
+        if (!fechaFila || fechaFila <= hoyStr) {
+          sheetTurnos.getRange(i + 1, 5).setValue("Cancelado");
+          actualizados++;
+        }
+      }
     }
   }
   

@@ -229,11 +229,12 @@ export const gasApi = {
     }
   },
 
-  async cancelarTurno(patente: string, motivo?: string): Promise<{ success: boolean; error?: string }> {
+  async cancelarTurno(patente: string, motivo?: string, fecha?: string): Promise<{ success: boolean; error?: string }> {
     try {
       const res = await callGasApi({
         accion: 'cancelarTurno',
         patente: patente.trim().toUpperCase(),
+        fecha: fecha ? normalizarFechaArgentina(fecha) : undefined,
         motivo: motivo || 'Cliente no asistió',
       });
       // Fallback si la versión instalada en Apps Script aún no tiene la acción 'cancelarTurno'

@@ -1,4 +1,4 @@
-import { useState, useEffect, useId, useMemo } from 'react';
+import { useState, useEffect, useId, useMemo, useRef } from 'react';
 import { User, Turno, HistorialServicio, Presupuesto } from '../types';
 import { gasApi } from '../services/gasApi';
 import { formatearFechaArgentina, calcularFechaVencimiento, formatearHorario, normalizarFechaArgentina, getFechaHoyArgentina } from '../utils/dateFormatter';
@@ -151,6 +151,16 @@ export const ClientDashboard = ({
 
     setBookingLoading(true);
     try {
+      // Limpiar marcas previas locales de cancelación/atención para la patente
+      try {
+        const canceladosRaw = localStorage.getItem('taller_turnos_cancelados_v1');
+        if (canceladosRaw) {
+          const arr: string[] = JSON.parse(canceladosRaw);
+          const filtrado = arr.filter((x) => x !== cleanPatente && !x.startsWith(`${cleanPatente}_`));
+          localStorage.setItem('taller_turnos_cancelados_v1', JSON.stringify(filtrado));
+        }
+      } catch {}
+
       const res = await gasApi.reserveTurno(user.email, fecha, horario, cleanPatente);
 
       if (res.resultado === 'mercadopago' && res.urlPago) {
@@ -178,31 +188,42 @@ export const ClientDashboard = ({
     }
   };
 
+  // Keep turnos ref up to date to prevent closure staleness without triggering unnecessary effects
+  const turnosRef = useRef(turnos);
+  useEffect(() => {
+    turnosRef.current = turnos;
+  }, [turnos]);
+
   // Fetch client historical repairs
-  const loadClientHistory = async () => {
-    setLoadingHistorial(true);
+  const loadClientHistory = async (silent = false) => {
+    if (!silent) setLoadingHistorial(true);
     try {
       const res = await gasApi.getClientHistory(user.email);
       if (res.success && Array.isArray(res.historial)) {
-        setHistorialList(res.historial.map((h: any) => ({ ...h, fecha: normalizarFechaArgentina(h.fecha) })));
+        const normalizados = res.historial.map((h: any) => ({ ...h, fecha: normalizarFechaArgentina(h.fecha) }));
+        setHistorialList((prev) => {
+          if (JSON.stringify(prev) === JSON.stringify(normalizados)) return prev;
+          return normalizados;
+        });
       } else {
-        setHistorialList([]);
+        setHistorialList((prev) => (prev.length === 0 ? prev : []));
       }
     } catch (err: any) {
       console.error(err);
-      onShowToast('error', 'Error al cargar historial', 'No se pudieron consultar los trabajos previos.');
+      if (!silent) onShowToast('error', 'Error al cargar historial', 'No se pudieron consultar los trabajos previos.');
     } finally {
-      setLoadingHistorial(false);
+      if (!silent) setLoadingHistorial(false);
     }
   };
 
-  // Fetch client budgets & quotes
+  // Fetch client budgets & quotes without unmounting the UI
   const loadClientPresupuestos = async (silent = false) => {
     if (!silent) setLoadingPresupuestos(true);
     try {
       const res = await gasApi.getPresupuestos();
       if (res && res.success && Array.isArray(res.presupuestos)) {
-        const userPatentes = turnos.map((t) => (t.patente || '').toUpperCase().trim());
+        const currentTurnos = turnosRef.current || [];
+        const userPatentes = currentTurnos.map((t) => (t.patente || '').toUpperCase().trim());
         const userEmail = (user.email || '').toLowerCase().trim();
 
         const filtrados = res.presupuestos
@@ -213,9 +234,23 @@ export const ClientDashboard = ({
             return emailMatch || patenteMatch;
           });
 
-        setPresupuestos(filtrados);
+        setPresupuestos((prev) => {
+          if (JSON.stringify(prev) === JSON.stringify(filtrados)) {
+            return prev;
+          }
+          return filtrados;
+        });
+
+        // Mantener sincronizado el presupuesto del modal si está abierto y cambió algún estado
+        setPresupuestoSeleccionadoModal((currentModal) => {
+          if (!currentModal) return null;
+          const updated = filtrados.find((p) => p.id === currentModal.id);
+          if (!updated) return currentModal;
+          if (JSON.stringify(updated) === JSON.stringify(currentModal)) return currentModal;
+          return updated;
+        });
       } else {
-        setPresupuestos([]);
+        setPresupuestos((prev) => (prev.length === 0 ? prev : []));
       }
     } catch (err) {
       console.warn('Error loading client presupuestos:', err);
@@ -237,7 +272,14 @@ export const ClientDashboard = ({
             patente: t.patente,
             estado: t.estado || 'Programado',
           }));
-        setTurnos(filtrados);
+
+        setTurnos((prev) => {
+          if (JSON.stringify(prev) === JSON.stringify(filtrados)) {
+            return prev;
+          }
+          return filtrados;
+        });
+
         try {
           localStorage.setItem('lacasadeladireccion_turnos', JSON.stringify(filtrados));
         } catch {}
@@ -247,17 +289,33 @@ export const ClientDashboard = ({
     }
   };
 
+  // Carga inicial al ingresar o cambiar de usuario
   useEffect(() => {
     loadClientTurnos();
+    loadClientPresupuestos(false);
   }, [user.email]);
 
-  useEffect(() => {
-    loadClientPresupuestos();
-  }, [user.email, turnos]);
+  // Si cambian las patentes registradas del usuario, refrescar silenciosamente los presupuestos asociados
+  const patentesKey = useMemo(() => {
+    return Array.from(new Set(turnos.map((t) => (t.patente || '').toUpperCase().trim()))).sort().join(',');
+  }, [turnos]);
 
-  // Sincronización en tiempo real: cuando el admin cambia el estado del auto o presupuesto
+  const isFirstPatentesRef = useRef(true);
   useEffect(() => {
-    // 1. BroadcastChannel para sincronización instantánea (<10ms) entre pestañas y ventanas
+    if (isFirstPatentesRef.current) {
+      isFirstPatentesRef.current = false;
+      return;
+    }
+    loadClientPresupuestos(true);
+  }, [patentesKey]);
+
+  // Sincronización en tiempo real fluida:
+  // 1. BroadcastChannel para sincronización instantánea entre pestañas
+  // 2. Storage event
+  // 3. Eventos personalizados de la aplicación
+  // 4. Retorno a la pestaña (foco/visibilidad)
+  // 5. Polling suave en segundo plano (cada 25s), 100% silencioso y sin parpadeos
+  useEffect(() => {
     let bc: BroadcastChannel | null = null;
     if (typeof BroadcastChannel !== 'undefined') {
       try {
@@ -269,7 +327,6 @@ export const ClientDashboard = ({
       } catch {}
     }
 
-    // 2. Storage event para cambios de localStorage entre pestañas
     const handleStorage = (e: StorageEvent) => {
       if (
         e.key === 'taller_presupuestos_v1' ||
@@ -283,7 +340,6 @@ export const ClientDashboard = ({
     };
     window.addEventListener('storage', handleStorage);
 
-    // 3. Evento interno personalizado
     const handleCustomSync = () => {
       loadClientPresupuestos(true);
       loadClientTurnos();
@@ -291,7 +347,6 @@ export const ClientDashboard = ({
     window.addEventListener('taller_presupuesto_sync', handleCustomSync);
     window.addEventListener('taller_turnos_sync', handleCustomSync);
 
-    // 4. Evento de foco/visibilidad: si el cliente vuelve a la pestaña, refrescar al segundo
     const handleFocus = () => {
       loadClientPresupuestos(true);
       loadClientTurnos();
@@ -305,11 +360,11 @@ export const ClientDashboard = ({
     };
     document.addEventListener('visibilitychange', handleVisibility);
 
-    // 5. Polling en segundo plano cada 7 segundos para sincronización de turnos y presupuestos entre distintos dispositivos
+    // Polling en segundo plano suave cada 25 segundos (completamente silencioso, no toca loadingPresupuestos)
     const interval = setInterval(() => {
       loadClientPresupuestos(true);
       loadClientTurnos();
-    }, 7000);
+    }, 25000);
 
     return () => {
       if (bc) bc.close();
@@ -320,13 +375,13 @@ export const ClientDashboard = ({
       document.removeEventListener('visibilitychange', handleVisibility);
       clearInterval(interval);
     };
-  }, [user.email, turnos]);
+  }, [user.email]);
 
   useEffect(() => {
     if (activeTab === 'historial') {
-      loadClientHistory();
+      loadClientHistory(listaHistorialCompleta.length > 0);
     } else if (activeTab === 'presupuestos') {
-      loadClientPresupuestos();
+      loadClientPresupuestos(presupuestos.length > 0);
     }
   }, [activeTab]);
 
@@ -579,27 +634,41 @@ export const ClientDashboard = ({
   const turnosProgramados = turnos.filter((t) => {
     if (String(t.estado).toLowerCase().trim() !== 'programado') return false;
     const cleanPat = String(t.patente || '').toUpperCase().trim();
-    // Excluir si ya tiene un presupuesto facturado (servicio concluido y archivado)
+    const fechaNorm = normalizarFechaArgentina(t.fecha || '');
+    const hoyStr = getFechaHoyArgentina();
+
+    // Excluir si ya tiene un presupuesto facturado para esa misma fecha (servicio ya concluido y facturado)
     const estaFacturado = presupuestos.some(
-      (p) => (p.patente || '').toUpperCase().trim() === cleanPat && p.estado === 'facturado'
+      (p) => (p.patente || '').toUpperCase().trim() === cleanPat && p.estado === 'facturado' && normalizarFechaArgentina(p.fecha) === fechaNorm
     );
     if (estaFacturado) return false;
 
+    // Si es un turno programado para hoy o el futuro, NO ocultarlo por marcas de cancelación viejas
     try {
-      const saved = localStorage.getItem('taller_turnos_atendidos_v1');
-      if (saved) {
-        const list: string[] = JSON.parse(saved);
-        if (list.map((x) => x.toUpperCase().trim()).includes(cleanPat)) {
+      const cancelados = localStorage.getItem('taller_turnos_cancelados_v1');
+      if (cancelados) {
+        const list: string[] = JSON.parse(cancelados);
+        const setCancelados = new Set(list.map((x) => x.toUpperCase().trim()));
+        // Solo excluir si está explícitamente cancelada esa fecha específica
+        if (fechaNorm && setCancelados.has(`${cleanPat}_${fechaNorm}`)) {
+          return false;
+        }
+        // Si estaba guardada solo la patente sin fecha (legado), solo aplica si el turno es del pasado
+        if (setCancelados.has(cleanPat) && fechaNorm < hoyStr) {
           return false;
         }
       }
     } catch {}
 
     try {
-      const cancelados = localStorage.getItem('taller_turnos_cancelados_v1');
-      if (cancelados) {
-        const list: string[] = JSON.parse(cancelados);
-        if (list.map((x) => x.toUpperCase().trim()).includes(cleanPat)) {
+      const saved = localStorage.getItem('taller_turnos_atendidos_v1');
+      if (saved) {
+        const list: string[] = JSON.parse(saved);
+        const setAtendidos = new Set(list.map((x) => x.toUpperCase().trim()));
+        if (fechaNorm && setAtendidos.has(`${cleanPat}_${fechaNorm}`)) {
+          return false;
+        }
+        if (setAtendidos.has(cleanPat) && fechaNorm < hoyStr) {
           return false;
         }
       }
@@ -810,7 +879,7 @@ export const ClientDashboard = ({
             setActiveTab('presupuestos');
             setPresupuestoSeleccionadoModal(p);
           }}
-          onRefresh={() => loadClientPresupuestos()}
+          onRefresh={() => loadClientPresupuestos(true)}
           refreshing={loadingPresupuestos}
         />
 
@@ -1077,9 +1146,20 @@ export const ClientDashboard = ({
                   Revisá el detalle de piezas y mano de obra para tu auto, aprobá la cotización online o consultá con Rodrigo.
                 </p>
               </div>
+
+              <button
+                type="button"
+                onClick={() => loadClientPresupuestos(false)}
+                disabled={loadingPresupuestos}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-800 text-xs font-heading font-bold uppercase tracking-wider transition-all cursor-pointer disabled:opacity-50"
+                title="Actualizar cotizaciones del taller"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-neutral-400 ${loadingPresupuestos ? 'animate-spin text-red-500' : ''}`} />
+                <span>{loadingPresupuestos ? 'Actualizando...' : 'Actualizar'}</span>
+              </button>
             </div>
 
-            {loadingPresupuestos ? (
+            {loadingPresupuestos && presupuestos.length === 0 ? (
               <div className="p-16 text-center text-neutral-400 text-xs">
                 <Loader2 className="w-8 h-8 animate-spin mx-auto mb-3 text-red-500" />
                 <span className="font-heading uppercase tracking-wider">Consultando presupuestos en el taller...</span>
@@ -1286,7 +1366,7 @@ export const ClientDashboard = ({
               </div>
             </div>
 
-            {loadingHistorial ? (
+            {loadingHistorial && listaHistorialCompleta.length === 0 ? (
               <div className="p-12 text-center text-neutral-400 text-xs">
                 <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-red-500" />
                 <span>Consultando tu historial clínico en el servidor...</span>
