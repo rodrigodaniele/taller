@@ -585,7 +585,8 @@ export const gasApi = {
     items: ItemPresupuesto[],
     vehiculoModelo?: string,
     fechaMovimiento?: string,
-    meta?: { patente?: string; clienteNombre?: string; presupuestoNumero?: string }
+    meta?: { patente?: string; clienteNombre?: string; presupuestoNumero?: string },
+    options?: { syncWithRemote?: boolean }
   ): Promise<void> {
     try {
       const repuestos = items.filter((it) => it.tipo === 'repuesto');
@@ -675,11 +676,13 @@ export const gasApi = {
       localStorage.setItem('taller_stock_v1', JSON.stringify(list));
       localStorage.setItem('taller_repuestos_usados_v1', JSON.stringify(listaUsados));
 
-      // Sincronizar en segundo plano con Google Sheets (hoja Repuestos_Utilizados)
-      for (const repUso of listaUsados.slice(0, repuestos.length)) {
-        try {
-          await callGasApi({ accion: 'registrarRepuestoUsado', uso: repUso });
-        } catch {}
+      // Solo si se solicita explícitamente sincronización remota individual (no cuando ya se envía a Google Apps Script por facturación o turno)
+      if (options?.syncWithRemote) {
+        for (const repUso of listaUsados.slice(0, repuestos.length)) {
+          try {
+            await callGasApi({ accion: 'registrarRepuestoUsado', uso: repUso });
+          } catch {}
+        }
       }
 
       if (typeof window !== 'undefined') {

@@ -747,7 +747,12 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
             precioUnitario: 0,
             subtotal: 0,
           }));
-          gasApi.actualizarRotacionYDescontarStock(repuestoItems, selectedTurno.patente, fechaExactaTrabajo);
+          gasApi.actualizarRotacionYDescontarStock(
+            repuestoItems,
+            '',
+            fechaExactaTrabajo,
+            { patente: selectedTurno.patente, clienteNombre: selectedTurno.nombre || selectedTurno.email }
+          );
           fetchStock(true);
         } catch {}
 
@@ -2174,7 +2179,7 @@ function registrarTrabajoDesdePresupuesto(p) {
   // 3. Impactar en la hoja 'Stock': sumar a rotación de repuestos y descontar si hay stock físico (respetando la fecha del turno/presupuesto)
   if (Array.isArray(p.items) && p.items.length > 0) {
     try {
-      actualizarRotacionStockSheet(p.items, modeloFmt || patenteFmt, fechaFmt);
+      actualizarRotacionStockSheet(p.items, modeloFmt || patenteFmt, fechaFmt, { patente: patenteFmt, cliente: p.clienteNombre || "", presupuestoId: nroPres });
     } catch(eStock) {}
   }
 
@@ -2239,7 +2244,7 @@ function registrarTrabajoAdmin(datosTrabajo) {
   // Actualizar rotación histórica en la hoja 'Stock'
   if (datosTrabajo && datosTrabajo.trabajoRealizado) {
     try {
-      actualizarRotacionDesdeTextoAdminSheet(datosTrabajo.trabajoRealizado, datosTrabajo.patente, fechaFmtAdmin);
+      actualizarRotacionDesdeTextoAdminSheet(datosTrabajo.trabajoRealizado, datosTrabajo.modelo || "", fechaFmtAdmin, { patente: datosTrabajo.patente, cliente: datosTrabajo.email });
     } catch(eStockAdmin) {}
   }
 
@@ -2290,17 +2295,40 @@ function registrarRepuestoUsadoSheet(uso) {
   var id = uso.id || ("USO-" + new Date().getTime());
   var fechaFmt = uso.fecha ? formatearFechaParaAppsScript(uso.fecha) : getFechaHoyArgentinaAppsScript();
   var cant = Number(uso.cantidad) || 1;
-  
+  var descTrim = String(uso.repuestoNombre || "").trim();
+  var vehTrim = String(uso.vehiculo || "").trim();
+  var nombreUnificado = (vehTrim && descTrim.toUpperCase().indexOf(vehTrim.toUpperCase()) === -1)
+    ? (descTrim + " - " + vehTrim)
+    : descTrim;
+  var patTrim = uso.patente ? uso.patente.toString().toUpperCase().trim() : "";
+  var presIdTrim = uso.presupuestoId ? uso.presupuestoId.toString().trim() : "";
+
+  // Evitar duplicados si ya existe el mismo ID o el mismo presupuesto y repuesto
+  if (sheet.getLastRow() > 1) {
+    var dataUsados = sheet.getDataRange().getValues();
+    for (var u = 1; u < dataUsados.length; u++) {
+      var idFila = String(dataUsados[u][0] || "").trim();
+      var presFila = String(dataUsados[u][8] || "").trim();
+      var repFila = String(dataUsados[u][2] || "").trim().toUpperCase();
+      if (idFila === id) {
+        return { resultado: "ok", success: true, id: id, yaExistia: true };
+      }
+      if (presIdTrim && presFila === presIdTrim && repFila === nombreUnificado.toUpperCase()) {
+        return { resultado: "ok", success: true, id: idFila, yaExistia: true };
+      }
+    }
+  }
+
   sheet.appendRow([
     id,
     "'" + fechaFmt,
-    uso.repuestoNombre || "",
-    uso.vehiculo || "",
+    nombreUnificado,
+    vehTrim,
     cant,
-    uso.patente ? uso.patente.toString().toUpperCase() : "",
-    uso.cliente || "",
+    patTrim,
+    uso.cliente ? uso.cliente.toString().trim() : "",
     uso.origen || "manual",
-    uso.presupuestoId || "",
+    presIdTrim,
     uso.observaciones || ""
   ]);
 
@@ -2308,10 +2336,18 @@ function registrarRepuestoUsadoSheet(uso) {
   var sheetStock = ss.getSheetByName("Stock") || ss.insertSheet("Stock");
   if (sheetStock.getLastRow() > 1) {
     var stockData = sheetStock.getDataRange().getValues();
-    var nomTarget = String(uso.repuestoNombre || "").trim().toUpperCase();
+    var targetFull = nombreUnificado.toUpperCase();
+    var targetDesc = descTrim.toUpperCase();
+    var targetVeh = vehTrim.toUpperCase();
+
     for (var r = 1; r < stockData.length; r++) {
       var nomFila = String(stockData[r][1] || "").trim().toUpperCase();
-      if (nomFila === nomTarget || nomTarget.indexOf(nomFila) !== -1 || nomFila.indexOf(nomTarget) !== -1) {
+      var vehFila = String(stockData[r][3] || "").trim().toUpperCase();
+
+      if (nomFila === targetFull || 
+          (nomFila === targetDesc && targetVeh && (vehFila === targetVeh || nomFila.indexOf(targetVeh) !== -1)) ||
+          (nomFila.indexOf(targetDesc) !== -1 && targetVeh && (nomFila.indexOf(targetVeh) !== -1 || vehFila.indexOf(targetVeh) !== -1)) ||
+          nomFila === targetDesc) {
         var stockActual = Number(stockData[r][4]) || 0;
         if (stockActual > 0) {
           sheetStock.getRange(r + 1, 5).setValue(Math.max(0, stockActual - cant));
@@ -2480,42 +2516,86 @@ function ingresarCompraStockSheet(datos) {
   return { resultado: "ok", success: true };
 }
 
-function actualizarRotacionStockSheet(items, vehiculoModelo, fechaMov) {
+function actualizarRotacionStockSheet(items, vehiculoModelo, fechaMov, meta) {
   if (!items || !items.length) return;
+  meta = meta || {};
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("Stock") || ss.insertSheet("Stock");
-  if (sheet.getLastRow() === 0) {
-    sheet.appendRow(["ID", "Nombre", "Categoria", "VehiculoCompatibilidad", "StockActual", "StockMinimo", "CostoUnitario", "PrecioVenta", "TotalInstalados", "UltimoMovimiento"]);
+  var sheetStock = ss.getSheetByName("Stock") || ss.insertSheet("Stock");
+  if (sheetStock.getLastRow() === 0) {
+    sheetStock.appendRow(["ID", "Nombre", "Categoria", "VehiculoCompatibilidad", "StockActual", "StockMinimo", "CostoUnitario", "PrecioVenta", "TotalInstalados", "UltimoMovimiento"]);
   }
   var fechaFinal = fechaMov ? formatearFechaParaAppsScript(fechaMov) : getFechaHoyArgentinaAppsScript();
-  var data = sheet.getDataRange().getValues();
+  var vehFmt = (vehiculoModelo || "").toString().trim();
+  var patFmt = (meta.patente || "").toString().trim().toUpperCase();
+  var cliFmt = (meta.cliente || "").toString().trim();
+  var presIdFmt = (meta.presupuestoId || "").toString().trim();
+
+  var sheetUsados = ss.getSheetByName("Repuestos_Utilizados") || ss.insertSheet("Repuestos_Utilizados");
+  if (sheetUsados.getLastRow() === 0) {
+    sheetUsados.appendRow(["ID", "Fecha", "Repuesto", "Vehiculo", "Cantidad", "Patente", "Cliente", "Origen", "PresupuestoID", "Observaciones"]);
+  }
+
+  // Prevenir duplicados si ya existen filas de este presupuesto
+  var yaRegistradosEnUsados = {};
+  if (sheetUsados.getLastRow() > 1 && presIdFmt) {
+    var datosU = sheetUsados.getDataRange().getValues();
+    for (var du = 1; du < datosU.length; du++) {
+      var presU = datosU[du][8] ? datosU[du][8].toString().trim() : "";
+      var repU = datosU[du][2] ? datosU[du][2].toString().trim().toUpperCase() : "";
+      if (presU && presU === presIdFmt) {
+        yaRegistradosEnUsados[presU + "___" + repU] = true;
+      }
+    }
+  }
+
+  var stockData = sheetStock.getDataRange().getValues();
+
   for (var k = 0; k < items.length; k++) {
     var item = items[k];
     if (item.tipo !== "repuesto") continue;
     var cant = Number(item.cantidad) || 1;
-    var nomNorm = String(item.descripcion || "").trim().toUpperCase();
+    var descTrim = String(item.descripcion || "").trim();
+    if (!descTrim) continue;
+
+    // Formato estandarizado identico a la carga manual: repuesto - vehiculo
+    var nombreUnificado = (vehFmt && descTrim.toUpperCase().indexOf(vehFmt.toUpperCase()) === -1)
+      ? (descTrim + " - " + vehFmt)
+      : descTrim;
+    var targetFull = nombreUnificado.toUpperCase();
+    var targetDesc = descTrim.toUpperCase();
+    var targetVeh = vehFmt.toUpperCase();
+
+    // 1. Descontar stock y sumar rotación en hoja 'Stock'
     var encontrado = false;
-    for (var r = 1; r < data.length; r++) {
-      var nomFila = String(data[r][1] || "").trim().toUpperCase();
-      if (nomFila === nomNorm || nomNorm.indexOf(nomFila) !== -1 || nomFila.indexOf(nomNorm) !== -1) {
-        var stockActual = Number(data[r][4]) || 0;
+    for (var r = 1; r < stockData.length; r++) {
+      var nomFila = String(stockData[r][1] || "").trim().toUpperCase();
+      var vehFila = String(stockData[r][3] || "").trim().toUpperCase();
+
+      if (nomFila === targetFull || 
+          (nomFila === targetDesc && targetVeh && (vehFila === targetVeh || nomFila.indexOf(targetVeh) !== -1)) ||
+          (nomFila.indexOf(targetDesc) !== -1 && targetVeh && (nomFila.indexOf(targetVeh) !== -1 || vehFila.indexOf(targetVeh) !== -1)) ||
+          nomFila === targetDesc) {
+        var stockActual = Number(stockData[r][4]) || 0;
         if (stockActual > 0) {
-          sheet.getRange(r + 1, 5).setValue(Math.max(0, stockActual - cant));
+          sheetStock.getRange(r + 1, 5).setValue(Math.max(0, stockActual - cant));
+          stockData[r][4] = Math.max(0, stockActual - cant);
         }
-        var rotacionPrev = Number(data[r][8]) || 0;
-        sheet.getRange(r + 1, 9).setValue(rotacionPrev + cant);
-        sheet.getRange(r + 1, 10).setValue("'" + fechaFinal);
+        var rotacionPrev = Number(stockData[r][8]) || 0;
+        sheetStock.getRange(r + 1, 9).setValue(rotacionPrev + cant);
+        stockData[r][8] = rotacionPrev + cant;
+        sheetStock.getRange(r + 1, 10).setValue("'" + fechaFinal);
         encontrado = true;
         break;
       }
     }
+
     if (!encontrado) {
       var nuevoID = "STOCK-" + new Date().getTime() + "-" + Math.floor(Math.random() * 1000);
-      sheet.appendRow([
+      sheetStock.appendRow([
         nuevoID,
-        item.descripcion,
+        nombreUnificado,
         "Tren Delantero / Suspensión",
-        vehiculoModelo || "Multimarca",
+        vehFmt || "Multimarca",
         0,
         2,
         0,
@@ -2524,45 +2604,40 @@ function actualizarRotacionStockSheet(items, vehiculoModelo, fechaMov) {
         "'" + fechaFinal
       ]);
     }
-  }
 
-  // Registrar también en la hoja 'Repuestos_Utilizados' (Módulo 1)
-  try {
-    var sheetUsados = ss.getSheetByName("Repuestos_Utilizados") || ss.insertSheet("Repuestos_Utilizados");
-    if (sheetUsados.getLastRow() === 0) {
-      sheetUsados.appendRow(["ID", "Fecha", "Repuesto", "Vehiculo", "Cantidad", "Patente", "Cliente", "Origen", "PresupuestoID", "Observaciones"]);
-    }
-    for (var u = 0; u < items.length; u++) {
-      var itUso = items[u];
-      if (itUso.tipo !== "repuesto") continue;
+    // 2. Registrar en 'Repuestos_Utilizados' (Módulo 1) con formato exacto y sin duplicar
+    var claveVerif = presIdFmt ? (presIdFmt + "___" + targetFull) : "";
+    if (!claveVerif || !yaRegistradosEnUsados[claveVerif]) {
+      var nuevoUsoID = "USO-" + new Date().getTime() + "-" + Math.floor(Math.random() * 1000);
       sheetUsados.appendRow([
-        "USO-" + new Date().getTime() + "-" + Math.floor(Math.random() * 1000),
+        nuevoUsoID,
         "'" + fechaFinal,
-        itUso.descripcion,
-        vehiculoModelo || "",
-        Number(itUso.cantidad) || 1,
-        "",
-        "",
+        nombreUnificado,
+        vehFmt || "",
+        cant,
+        patFmt,
+        cliFmt,
         "facturacion",
-        "",
-        "Facturado automáticamente desde servicio de taller"
+        presIdFmt,
+        presIdFmt ? ("Facturado automáticamente en Presupuesto #" + presIdFmt) : "Facturado automáticamente desde servicio de taller"
       ]);
+      if (claveVerif) yaRegistradosEnUsados[claveVerif] = true;
     }
-  } catch(eUsados) {}
+  }
 }
 
-function actualizarRotacionDesdeTextoAdminSheet(textoTrabajo, patente, fechaMov) {
+function actualizarRotacionDesdeTextoAdminSheet(textoTrabajo, vehiculoModelo, fechaMov, meta) {
   if (!textoTrabajo) return;
   var partes = String(textoTrabajo).split(" + ");
   var items = [];
   for (var p = 0; p < partes.length; p++) {
-    var nom = partes[p].replace(/\\s*\\[.*\\]/, "").trim();
+    var nom = partes[p].replace(/\s*\[.*\]/, "").trim();
     if (nom) {
       items.push({ tipo: "repuesto", descripcion: nom, cantidad: 1 });
     }
   }
   if (items.length > 0) {
-    actualizarRotacionStockSheet(items, patente, fechaMov);
+    actualizarRotacionStockSheet(items, vehiculoModelo, fechaMov, meta);
   }
 }
 
