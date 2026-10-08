@@ -2818,40 +2818,44 @@ function obtenerHistorialCliente(emailCliente) {
                 Administración General · La Casa de la Dirección
               </div>
               <h1 className="text-xl sm:text-2xl font-heading font-black text-white uppercase tracking-tight">
-                Panel de Control & Contabilidad
+                Panel de Administración
               </h1>
               <p className="text-xs text-neutral-400">
-                Turnos, reparaciones y gestión de caja vinculada con tu Google Sheets.
+                Gestión integral de turnos, presupuestos, repuestos e inventario, y caja del taller.
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                startTransition(() => {
-                  setNuevoTipo('ingreso');
-                  setShowModalMovimiento(true);
-                });
-              }}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-heading font-bold text-xs uppercase tracking-wider transition-all shadow-md shadow-emerald-950"
-            >
-              <PlusCircle className="w-4 h-4" />
-              <span>+ Registrar Ingreso</span>
-            </button>
-            <button
-              onClick={() => {
-                startTransition(() => {
-                  setNuevoTipo('gasto');
-                  setShowModalMovimiento(true);
-                });
-              }}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded bg-neutral-950 hover:bg-red-950 text-red-400 border border-red-800/60 font-heading font-bold text-xs uppercase tracking-wider transition-all"
-            >
-              <MinusCircle className="w-4 h-4" />
-              <span>- Registrar Gasto</span>
-            </button>
-          </div>
+          {activeAdminTab === 'contabilidad' && (
+            <div className="flex items-center gap-2 animate-in fade-in duration-200">
+              <button
+                type="button"
+                onClick={() => {
+                  startTransition(() => {
+                    setNuevoTipo('ingreso');
+                    setShowModalMovimiento(true);
+                  });
+                }}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-heading font-bold text-xs uppercase tracking-wider transition-all shadow-md shadow-emerald-950 cursor-pointer"
+              >
+                <PlusCircle className="w-4 h-4" />
+                <span>+ Registrar Ingreso</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  startTransition(() => {
+                    setNuevoTipo('gasto');
+                    setShowModalMovimiento(true);
+                  });
+                }}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded bg-neutral-950 hover:bg-red-950 text-red-400 border border-red-800/60 font-heading font-bold text-xs uppercase tracking-wider transition-all cursor-pointer"
+              >
+                <MinusCircle className="w-4 h-4" />
+                <span>- Registrar Gasto</span>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Tab selector */}
