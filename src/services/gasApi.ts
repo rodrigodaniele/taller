@@ -882,11 +882,11 @@ export const gasApi = {
       }
       localStorage.setItem('taller_stock_v1', JSON.stringify(listStock));
 
-      // 3. IMPACTAR EN CONTABILIDAD COMO GASTO NEGATIVO (Requerimiento estricto del usuario)
+      // 3. IMPACTAR EN CONTABILIDAD COMO GASTO NEGATIVO (REGISTRO ÚNICO Y CENTRALIZADO)
       if (compra.impactaContabilidad && compra.costoTotal > 0) {
         const provTxt = compra.proveedor ? ` (${compra.proveedor})` : '';
         const movGasto = {
-          id: 'MOV-STOCK-' + Date.now(),
+          id: `MOV-${id}`,
           fecha: compra.fecha ? normalizarFechaArgentina(compra.fecha) : getFechaHoyArgentina(),
           tipo: 'gasto' as const,
           concepto: `Compra Repuestos: ${compra.cantidad}x ${compra.repuestoNombre}${provTxt}`,
@@ -911,8 +911,14 @@ export const gasApi = {
       }
 
       // 5. Guardar en Google Sheets (hoja Compras_Repuestos y actualizar hoja Stock)
+      // NOTA: Pasamos impactaContabilidad: false en la llamada de registrarCompraRepuesto porque
+      // el movimiento contable ya fue enviado a Google Sheets de manera unificada mediante
+      // addAccountingMovement (acción 'registrarMovimientoContable'). Esto evita duplicar o triplicar el gasto.
       try {
-        await callGasApi({ accion: 'registrarCompraRepuesto', compra: nuevaCompra });
+        await callGasApi({
+          accion: 'registrarCompraRepuesto',
+          compra: { ...nuevaCompra, impactaContabilidad: false, yaImpactoContabilidad: true },
+        });
       } catch (sheetErr) {
         console.warn('Guardado en caché local, se sincronizará al conectar con Google Sheets:', sheetErr);
       }

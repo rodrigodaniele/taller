@@ -404,9 +404,19 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
       const res = await gasApi.getAccountingMovements();
       if (res.success && Array.isArray(res.movimientos)) {
         const norm = res.movimientos.map((m: any) => ({ ...m, fecha: normalizarFechaArgentina(m.fecha) }));
-        setMovimientos(norm);
+        // Deduplicación preventiva por ID para asegurar registros únicos en la vista
+        const seenIds = new Set<string>();
+        const deduped: MovimientoContable[] = [];
+        for (const m of norm) {
+          const key = m.id ? String(m.id).trim() : `${m.fecha}-${m.tipo}-${m.concepto}-${m.monto}`;
+          if (!seenIds.has(key)) {
+            seenIds.add(key);
+            deduped.push(m);
+          }
+        }
+        setMovimientos(deduped);
         try {
-          localStorage.setItem('lacasadeladireccion_contabilidad', JSON.stringify(norm));
+          localStorage.setItem('lacasadeladireccion_contabilidad', JSON.stringify(deduped));
         } catch {}
       } else {
         setMovimientos([]);
@@ -805,19 +815,10 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
     }
   };
 
-  // Registrar gasto en Contabilidad cuando se compre stock de repuestos
-  const handleRegistrarGastoDesdeStock = async (concepto: string, monto: number, metodoPago: string) => {
-    const nuevoMovimiento: MovimientoContable = {
-      id: 'MOV-STOCK-' + Date.now(),
-      fecha: getFechaHoyArgentina(),
-      tipo: 'gasto',
-      concepto,
-      categoria: 'Repuestos / Repuesteros',
-      monto,
-      metodoPago: metodoPago || 'Efectivo',
-      referencia: 'STOCK TALLER',
-    };
-    await gasApi.addAccountingMovement(nuevoMovimiento);
+  // Refrescar contabilidad si se registra una compra de repuestos
+  const handleRegistrarGastoDesdeStock = async (_concepto: string, _monto: number, _metodoPago: string) => {
+    // Las compras de repuestos en Módulo 2 ya registran su gasto en contabilidad de manera única y centralizada.
+    // Esta función solo asegura el refresco instantáneo de los movimientos contables.
     fetchContabilidad(true);
   };
 
@@ -1770,7 +1771,16 @@ function registrarMovimientoContabilidad(m) {
     sheet.appendRow(["ID", "Fecha", "Tipo", "Concepto", "Categoria", "Monto", "MetodoPago", "Referencia"]);
   }
   
-  var id = m.id || "MOV-" + new Date().getTime();
+  var id = m.id || ("MOV-" + new Date().getTime());
+
+  // Protección anti-duplicados por ID: si el movimiento ya existe en la hoja, no duplicar la fila
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim() === String(id).trim()) {
+      return { success: true, id: id, duplicado: true };
+    }
+  }
+
   sheet.appendRow([id, "'" + m.fecha, m.tipo, m.concepto, m.categoria, Number(m.monto), m.metodoPago, m.referencia || ""]);
   return { success: true, id: id };
 }
@@ -2605,10 +2615,10 @@ function registrarCompraRepuestoSheet(compra) {
     ]);
   }
 
-  // 3. Impactar en Contabilidad si se solicitó
-  if (impactaCont && costoTotal > 0) {
+  // 3. Impactar en Contabilidad (única vez, solo si no fue enviado previamente por el flujo unificado)
+  if (impactaCont && costoTotal > 0 && !compra.yaImpactoContabilidad) {
     registrarMovimientoContabilidad({
-      id: "MOV-STOCK-" + new Date().getTime(),
+      id: "MOV-" + id,
       fecha: fechaFmt,
       tipo: "gasto",
       concepto: "Compra Repuestos: " + cant + "x " + repuestoNom + (prov ? (" (" + prov + ")") : ""),

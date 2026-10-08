@@ -336,13 +336,8 @@ export const StockManager = ({
       });
 
       if (res.success) {
-        if (compraImpactaContabilidad && total > 0 && onRegistrarGastoContabilidad) {
-          onRegistrarGastoContabilidad(
-            `Compra Repuestos: ${cant}x ${piezaNombre}${compraProveedor ? ` (${compraProveedor})` : ''}`,
-            total,
-            compraMetodoPago
-          );
-        }
+        // NOTA: El movimiento contable ya se registra exactamente una sola vez dentro de gasApi.registrarCompraRepuesto.
+        // No llamamos onRegistrarGastoContabilidad para no duplicar ni triplicar el registro.
 
         const stockActualizado = await gasApi.getStockItems();
         onStockUpdated(stockActualizado.items);
