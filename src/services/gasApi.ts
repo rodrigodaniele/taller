@@ -592,8 +592,6 @@ export const gasApi = {
       const repuestos = items.filter((it) => it.tipo === 'repuesto');
       if (repuestos.length === 0) return;
 
-      const saved = localStorage.getItem('taller_stock_v1');
-      const list: ItemStock[] = saved ? JSON.parse(saved) : [];
       const fechaFinal = fechaMovimiento ? normalizarFechaArgentina(fechaMovimiento) : getFechaHoyArgentina();
 
       // Registro de repuestos usados para el Módulo 1 (Rotación y consumos del taller)
@@ -605,61 +603,12 @@ export const gasApi = {
         const descTrim = rep.descripcion.trim();
         const vehTrim = (vehiculoModelo || '').trim();
         const claveUnificada = vehTrim ? `${descTrim} - ${vehTrim}` : descTrim;
-        const targetFull = claveUnificada.toUpperCase();
-        const targetDesc = descTrim.toUpperCase();
-        const targetVeh = vehTrim.toUpperCase();
 
-        let stockItem = list.find((x) => {
-          const xNom = x.nombre.trim().toUpperCase();
-          const xVeh = (x.vehiculoCompatibilidad || '').trim().toUpperCase();
-
-          // 1. Coincidencia exacta con la clave unificada ("RÓTULA DE SUSPENSIÓN - PEUGEOT 206")
-          if (xNom === targetFull) return true;
-
-          // 2. Coincidencia por descripción y compatibilidad
-          if (xNom === targetDesc && targetVeh && (xVeh === targetVeh || xNom.includes(targetVeh))) return true;
-
-          // 3. Coincidencia si el nombre contiene la pieza y el auto
-          if (xNom.includes(targetDesc) && targetVeh && (xNom.includes(targetVeh) || xVeh.includes(targetVeh))) return true;
-
-          // 4. Coincidencia por descripción base directa
-          if (xNom === targetDesc) return true;
-
-          return false;
-        });
-
-        const nombreFinalPieza = stockItem ? stockItem.nombre : claveUnificada;
-
-        if (stockItem) {
-          // Si tiene stock físico disponible, se descuenta 1 (o la cantidad usada)
-          if (stockItem.stockActual > 0) {
-            stockItem.stockActual = Math.max(0, stockItem.stockActual - cant);
-          }
-          // Sumar a la rotación histórica de piezas cambiadas
-          stockItem.totalInstalados = (Number(stockItem.totalInstalados) || 0) + cant;
-          stockItem.ultimoMovimiento = fechaFinal;
-        } else {
-          // Registrar en catálogo con formato estandarizado
-          const nuevoItem: ItemStock = {
-            id: 'STOCK-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
-            nombre: claveUnificada,
-            categoria: 'Tren Delantero / Suspensión',
-            vehiculoCompatibilidad: vehTrim || 'Multimarca',
-            stockActual: 0,
-            stockMinimo: 2,
-            costoUnitario: 0,
-            precioVenta: rep.precioUnitario || 0,
-            totalInstalados: cant,
-            ultimoMovimiento: fechaFinal,
-          };
-          list.push(nuevoItem);
-        }
-
-        // Agregar al historial de repuestos utilizados (Módulo 1)
+        // Agregar exclusivamente al historial de repuestos utilizados (Módulo 1) sin alterar el inventario físico del Panel 2
         const nuevoUso: RepuestoUsado = {
           id: 'USO-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
           fecha: fechaFinal,
-          repuestoNombre: nombreFinalPieza,
+          repuestoNombre: claveUnificada,
           cantidad: cant,
           vehiculo: vehTrim || '',
           patente: meta?.patente || '',
@@ -673,7 +622,6 @@ export const gasApi = {
         listaUsados.unshift(nuevoUso);
       });
 
-      localStorage.setItem('taller_stock_v1', JSON.stringify(list));
       localStorage.setItem('taller_repuestos_usados_v1', JSON.stringify(listaUsados));
 
       // Solo si se solicita explícitamente sincronización remota individual (no cuando ya se envía a Google Apps Script por facturación o turno)

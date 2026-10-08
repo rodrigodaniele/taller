@@ -2332,34 +2332,6 @@ function registrarRepuestoUsadoSheet(uso) {
     uso.observaciones || ""
   ]);
 
-  // Descontar del stock físico en la hoja 'Stock' si existe
-  var sheetStock = ss.getSheetByName("Stock") || ss.insertSheet("Stock");
-  if (sheetStock.getLastRow() > 1) {
-    var stockData = sheetStock.getDataRange().getValues();
-    var targetFull = nombreUnificado.toUpperCase();
-    var targetDesc = descTrim.toUpperCase();
-    var targetVeh = vehTrim.toUpperCase();
-
-    for (var r = 1; r < stockData.length; r++) {
-      var nomFila = String(stockData[r][1] || "").trim().toUpperCase();
-      var vehFila = String(stockData[r][3] || "").trim().toUpperCase();
-
-      if (nomFila === targetFull || 
-          (nomFila === targetDesc && targetVeh && (vehFila === targetVeh || nomFila.indexOf(targetVeh) !== -1)) ||
-          (nomFila.indexOf(targetDesc) !== -1 && targetVeh && (nomFila.indexOf(targetVeh) !== -1 || vehFila.indexOf(targetVeh) !== -1)) ||
-          nomFila === targetDesc) {
-        var stockActual = Number(stockData[r][4]) || 0;
-        if (stockActual > 0) {
-          sheetStock.getRange(r + 1, 5).setValue(Math.max(0, stockActual - cant));
-        }
-        var rotacionPrev = Number(stockData[r][8]) || 0;
-        sheetStock.getRange(r + 1, 9).setValue(rotacionPrev + cant);
-        sheetStock.getRange(r + 1, 10).setValue("'" + fechaFmt);
-        break;
-      }
-    }
-  }
-
   return { resultado: "ok", success: true, id: id };
 }
 
@@ -2371,23 +2343,7 @@ function eliminarRepuestoUsadoSheet(id) {
   var data = sheet.getDataRange().getValues();
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][0]) === String(id)) {
-      var cant = Number(data[i][4]) || 1;
-      var nomPieza = String(data[i][2] || "").trim().toUpperCase();
       sheet.deleteRow(i + 1);
-
-      // Reintegrar al stock
-      var sheetStock = ss.getSheetByName("Stock");
-      if (sheetStock && sheetStock.getLastRow() > 1) {
-        var sData = sheetStock.getDataRange().getValues();
-        for (var s = 1; s < sData.length; s++) {
-          var sNom = String(sData[s][1] || "").trim().toUpperCase();
-          if (sNom === nomPieza || nomPieza.indexOf(sNom) !== -1 || sNom.indexOf(nomPieza) !== -1) {
-            var stAct = Number(sData[s][4]) || 0;
-            sheetStock.getRange(s + 1, 5).setValue(stAct + cant);
-            break;
-          }
-        }
-      }
       break;
     }
   }
@@ -2520,16 +2476,13 @@ function actualizarRotacionStockSheet(items, vehiculoModelo, fechaMov, meta) {
   if (!items || !items.length) return;
   meta = meta || {};
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetStock = ss.getSheetByName("Stock") || ss.insertSheet("Stock");
-  if (sheetStock.getLastRow() === 0) {
-    sheetStock.appendRow(["ID", "Nombre", "Categoria", "VehiculoCompatibilidad", "StockActual", "StockMinimo", "CostoUnitario", "PrecioVenta", "TotalInstalados", "UltimoMovimiento"]);
-  }
   var fechaFinal = fechaMov ? formatearFechaParaAppsScript(fechaMov) : getFechaHoyArgentinaAppsScript();
   var vehFmt = (vehiculoModelo || "").toString().trim();
   var patFmt = (meta.patente || "").toString().trim().toUpperCase();
   var cliFmt = (meta.cliente || "").toString().trim();
   var presIdFmt = (meta.presupuestoId || "").toString().trim();
 
+  // Registrar exclusivamente en 'Repuestos_Utilizados' (Módulo 1) sin tocar la hoja 'Stock' (Módulo 2 se maneja solo a mano)
   var sheetUsados = ss.getSheetByName("Repuestos_Utilizados") || ss.insertSheet("Repuestos_Utilizados");
   if (sheetUsados.getLastRow() === 0) {
     sheetUsados.appendRow(["ID", "Fecha", "Repuesto", "Vehiculo", "Cantidad", "Patente", "Cliente", "Origen", "PresupuestoID", "Observaciones"]);
@@ -2548,8 +2501,6 @@ function actualizarRotacionStockSheet(items, vehiculoModelo, fechaMov, meta) {
     }
   }
 
-  var stockData = sheetStock.getDataRange().getValues();
-
   for (var k = 0; k < items.length; k++) {
     var item = items[k];
     if (item.tipo !== "repuesto") continue;
@@ -2562,50 +2513,8 @@ function actualizarRotacionStockSheet(items, vehiculoModelo, fechaMov, meta) {
       ? (descTrim + " - " + vehFmt)
       : descTrim;
     var targetFull = nombreUnificado.toUpperCase();
-    var targetDesc = descTrim.toUpperCase();
-    var targetVeh = vehFmt.toUpperCase();
 
-    // 1. Descontar stock y sumar rotación en hoja 'Stock'
-    var encontrado = false;
-    for (var r = 1; r < stockData.length; r++) {
-      var nomFila = String(stockData[r][1] || "").trim().toUpperCase();
-      var vehFila = String(stockData[r][3] || "").trim().toUpperCase();
-
-      if (nomFila === targetFull || 
-          (nomFila === targetDesc && targetVeh && (vehFila === targetVeh || nomFila.indexOf(targetVeh) !== -1)) ||
-          (nomFila.indexOf(targetDesc) !== -1 && targetVeh && (nomFila.indexOf(targetVeh) !== -1 || vehFila.indexOf(targetVeh) !== -1)) ||
-          nomFila === targetDesc) {
-        var stockActual = Number(stockData[r][4]) || 0;
-        if (stockActual > 0) {
-          sheetStock.getRange(r + 1, 5).setValue(Math.max(0, stockActual - cant));
-          stockData[r][4] = Math.max(0, stockActual - cant);
-        }
-        var rotacionPrev = Number(stockData[r][8]) || 0;
-        sheetStock.getRange(r + 1, 9).setValue(rotacionPrev + cant);
-        stockData[r][8] = rotacionPrev + cant;
-        sheetStock.getRange(r + 1, 10).setValue("'" + fechaFinal);
-        encontrado = true;
-        break;
-      }
-    }
-
-    if (!encontrado) {
-      var nuevoID = "STOCK-" + new Date().getTime() + "-" + Math.floor(Math.random() * 1000);
-      sheetStock.appendRow([
-        nuevoID,
-        nombreUnificado,
-        "Tren Delantero / Suspensión",
-        vehFmt || "Multimarca",
-        0,
-        2,
-        0,
-        Number(item.precioUnitario) || 0,
-        cant,
-        "'" + fechaFinal
-      ]);
-    }
-
-    // 2. Registrar en 'Repuestos_Utilizados' (Módulo 1) con formato exacto y sin duplicar
+    // Registrar en 'Repuestos_Utilizados' (Módulo 1) con formato exacto y sin duplicar
     var claveVerif = presIdFmt ? (presIdFmt + "___" + targetFull) : "";
     if (!claveVerif || !yaRegistradosEnUsados[claveVerif]) {
       var nuevoUsoID = "USO-" + new Date().getTime() + "-" + Math.floor(Math.random() * 1000);

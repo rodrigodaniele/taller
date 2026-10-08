@@ -209,7 +209,7 @@ export const StockManager = ({
         onShowToast(
           'success',
           'Repuesto Utilizado Registrado',
-          `Se descontó ${cant} unid. de "${piezaNombre}" y se sumó a la rotación. No afecta contabilidad.`
+          `Se registró ${cant} unid. de "${piezaNombre}" en el historial de consumos. El inventario del Panel 2 se mantiene intacto.`
         );
         setShowModalUsado(false);
       } else {
