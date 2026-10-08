@@ -1714,6 +1714,24 @@ function doPost(e) {
       var resCancelado = pasarTurnoACanceladoPorPatente(datos.patente, datos.motivo, datos.fecha);
       return ContentService.createTextOutput(JSON.stringify(resCancelado)).setMimeType(ContentService.MimeType.JSON);
     }
+
+    // --- ACCIÓN 23: OBTENER REPUESTOS UTILIZADOS (MÓDULO 1) ---
+    if (datos.accion === "obtenerRepuestosUsados") {
+      var resUsados = obtenerRepuestosUsadosSheet();
+      return ContentService.createTextOutput(JSON.stringify(resUsados)).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // --- ACCIÓN 24: REGISTRAR REPUESTO UTILIZADO (MÓDULO 1 - DESCUENTA STOCK SI EXISTE) ---
+    if (datos.accion === "registrarRepuestoUsado") {
+      var resRegUso = registrarRepuestoUsadoSheet(datos.uso);
+      return ContentService.createTextOutput(JSON.stringify(resRegUso)).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // --- ACCIÓN 25: ELIMINAR REPUESTO UTILIZADO (MÓDULO 1 - RESTITUYE STOCK) ---
+    if (datos.accion === "eliminarRepuestoUsado") {
+      var resDelUso = eliminarRepuestoUsadoSheet(datos.id);
+      return ContentService.createTextOutput(JSON.stringify(resDelUso)).setMimeType(ContentService.MimeType.JSON);
+    }
                            
   } catch(error) {
     return ContentService.createTextOutput(JSON.stringify({"resultado": "error", "mensaje": error.toString()})).setMimeType(ContentService.MimeType.JSON);
@@ -2229,7 +2247,118 @@ function registrarTrabajoAdmin(datosTrabajo) {
   return { success: true };
 }
 
-// --- FUNCIONES MÓDULO DE STOCK & REPUESTOS ---
+// --- FUNCIONES MÓDULO 1: REPUESTOS UTILIZADOS & ROTACIÓN ---
+function obtenerRepuestosUsadosSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Repuestos_Utilizados");
+  if (!sheet) {
+    sheet = ss.insertSheet("Repuestos_Utilizados");
+    sheet.appendRow(["ID", "Fecha", "Repuesto", "Vehiculo", "Cantidad", "Patente", "Cliente", "Origen", "PresupuestoID", "Observaciones"]);
+    return { resultado: "ok", items: [] };
+  }
+  var data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return { resultado: "ok", items: [] };
+  var items = [];
+  for (var i = 1; i < data.length; i++) {
+    var r = data[i];
+    if (r[0] || r[2]) {
+      items.push({
+        id: String(r[0] || "USO-" + i),
+        fecha: formatearFechaParaAppsScript(r[1]) || String(r[1] || ""),
+        repuestoNombre: String(r[2] || ""),
+        vehiculo: String(r[3] || ""),
+        cantidad: Number(r[4]) || 1,
+        patente: String(r[5] || ""),
+        cliente: String(r[6] || ""),
+        origen: String(r[7] || "manual"),
+        presupuestoId: String(r[8] || ""),
+        observaciones: String(r[9] || "")
+      });
+    }
+  }
+  items.reverse();
+  return { resultado: "ok", items: items };
+}
+
+function registrarRepuestoUsadoSheet(uso) {
+  if (!uso) return { resultado: "error", mensaje: "Datos vacíos" };
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Repuestos_Utilizados") || ss.insertSheet("Repuestos_Utilizados");
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(["ID", "Fecha", "Repuesto", "Vehiculo", "Cantidad", "Patente", "Cliente", "Origen", "PresupuestoID", "Observaciones"]);
+  }
+  var id = uso.id || ("USO-" + new Date().getTime());
+  var fechaFmt = uso.fecha ? formatearFechaParaAppsScript(uso.fecha) : getFechaHoyArgentinaAppsScript();
+  var cant = Number(uso.cantidad) || 1;
+  
+  sheet.appendRow([
+    id,
+    "'" + fechaFmt,
+    uso.repuestoNombre || "",
+    uso.vehiculo || "",
+    cant,
+    uso.patente ? uso.patente.toString().toUpperCase() : "",
+    uso.cliente || "",
+    uso.origen || "manual",
+    uso.presupuestoId || "",
+    uso.observaciones || ""
+  ]);
+
+  // Descontar del stock físico en la hoja 'Stock' si existe
+  var sheetStock = ss.getSheetByName("Stock") || ss.insertSheet("Stock");
+  if (sheetStock.getLastRow() > 1) {
+    var stockData = sheetStock.getDataRange().getValues();
+    var nomTarget = String(uso.repuestoNombre || "").trim().toUpperCase();
+    for (var r = 1; r < stockData.length; r++) {
+      var nomFila = String(stockData[r][1] || "").trim().toUpperCase();
+      if (nomFila === nomTarget || nomTarget.indexOf(nomFila) !== -1 || nomFila.indexOf(nomTarget) !== -1) {
+        var stockActual = Number(stockData[r][4]) || 0;
+        if (stockActual > 0) {
+          sheetStock.getRange(r + 1, 5).setValue(Math.max(0, stockActual - cant));
+        }
+        var rotacionPrev = Number(stockData[r][8]) || 0;
+        sheetStock.getRange(r + 1, 9).setValue(rotacionPrev + cant);
+        sheetStock.getRange(r + 1, 10).setValue("'" + fechaFmt);
+        break;
+      }
+    }
+  }
+
+  return { resultado: "ok", success: true, id: id };
+}
+
+function eliminarRepuestoUsadoSheet(id) {
+  if (!id) return { resultado: "error" };
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Repuestos_Utilizados");
+  if (!sheet) return { resultado: "ok" };
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === String(id)) {
+      var cant = Number(data[i][4]) || 1;
+      var nomPieza = String(data[i][2] || "").trim().toUpperCase();
+      sheet.deleteRow(i + 1);
+
+      // Reintegrar al stock
+      var sheetStock = ss.getSheetByName("Stock");
+      if (sheetStock && sheetStock.getLastRow() > 1) {
+        var sData = sheetStock.getDataRange().getValues();
+        for (var s = 1; s < sData.length; s++) {
+          var sNom = String(sData[s][1] || "").trim().toUpperCase();
+          if (sNom === nomPieza || nomPieza.indexOf(sNom) !== -1 || sNom.indexOf(nomPieza) !== -1) {
+            var stAct = Number(sData[s][4]) || 0;
+            sheetStock.getRange(s + 1, 5).setValue(stAct + cant);
+            break;
+          }
+        }
+      }
+      break;
+    }
+  }
+  return { resultado: "ok", success: true };
+}
+
+// --- FUNCIONES MÓDULO 2: STOCK & INVENTARIO ---
 function obtenerStockSheet() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("Stock");
@@ -2396,6 +2525,30 @@ function actualizarRotacionStockSheet(items, vehiculoModelo, fechaMov) {
       ]);
     }
   }
+
+  // Registrar también en la hoja 'Repuestos_Utilizados' (Módulo 1)
+  try {
+    var sheetUsados = ss.getSheetByName("Repuestos_Utilizados") || ss.insertSheet("Repuestos_Utilizados");
+    if (sheetUsados.getLastRow() === 0) {
+      sheetUsados.appendRow(["ID", "Fecha", "Repuesto", "Vehiculo", "Cantidad", "Patente", "Cliente", "Origen", "PresupuestoID", "Observaciones"]);
+    }
+    for (var u = 0; u < items.length; u++) {
+      var itUso = items[u];
+      if (itUso.tipo !== "repuesto") continue;
+      sheetUsados.appendRow([
+        "USO-" + new Date().getTime() + "-" + Math.floor(Math.random() * 1000),
+        "'" + fechaFinal,
+        itUso.descripcion,
+        vehiculoModelo || "",
+        Number(itUso.cantidad) || 1,
+        "",
+        "",
+        "facturacion",
+        "",
+        "Facturado automáticamente desde servicio de taller"
+      ]);
+    }
+  } catch(eUsados) {}
 }
 
 function actualizarRotacionDesdeTextoAdminSheet(textoTrabajo, patente, fechaMov) {

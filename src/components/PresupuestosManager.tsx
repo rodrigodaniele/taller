@@ -131,7 +131,6 @@ export const PresupuestosManager = ({
   const [clienteTelefono, setClienteTelefono] = useState('');
   const [clienteEmail, setClienteEmail] = useState('');
   const [vehiculoModelo, setVehiculoModelo] = useState('');
-  const [modoVehiculoOtro, setModoVehiculoOtro] = useState(false);
   const [patente, setPatente] = useState('');
   const [fechaPresupuesto, setFechaPresupuesto] = useState(() => getFechaHoyArgentina());
   const [kilometraje, setKilometraje] = useState('');
@@ -218,7 +217,6 @@ export const PresupuestosManager = ({
       setFechaPresupuesto(getFechaHoyArgentina());
       setSelectedTurnoRef('');
     }
-    setModoVehiculoOtro(false);
     setKilometraje('');
     setValidezDias(7);
     setObservaciones('Presupuesto válido por 7 días. Precios en efectivo o transferencia bancaria. Mano de obra garantizada.');
@@ -247,8 +245,6 @@ export const PresupuestosManager = ({
     setClienteTelefono(p.clienteTelefono);
     setClienteEmail(p.clienteEmail || '');
     setVehiculoModelo(p.vehiculoModelo || '');
-    const esDeLista = VEHICULOS_ARGENTINA.includes(p.vehiculoModelo || '');
-    setModoVehiculoOtro(!esDeLista && Boolean(p.vehiculoModelo));
     setKilometraje(p.kilometraje || '');
     setValidezDias(p.validezDias);
     setObservaciones(p.observaciones || '');
@@ -1342,65 +1338,25 @@ export const PresupuestosManager = ({
                     {/* MARCA Y MODELO CON LISTA DESPLEGABLE COMPLETA DE TODOS LOS VEHÍCULOS DE ARGENTINA */}
                     <div>
                       <label className="block text-[11px] font-heading font-bold uppercase text-neutral-400 mb-1">
-                        Marca / Modelo del Vehículo *
+                        Marca / Modelo del Vehículo (Menú Desplegable) *
                       </label>
-                      <div className="space-y-1.5">
-                        <select
-                          value={
-                            modoVehiculoOtro
-                              ? 'OTRO'
-                              : VEHICULOS_ARGENTINA.includes(vehiculoModelo)
-                              ? vehiculoModelo
-                              : vehiculoModelo
-                              ? 'OTRO'
-                              : ''
-                          }
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            if (val === 'OTRO') {
-                              setModoVehiculoOtro(true);
-                              if (VEHICULOS_ARGENTINA.includes(vehiculoModelo)) {
-                                setVehiculoModelo('');
-                              }
-                            } else {
-                              setModoVehiculoOtro(false);
-                              setVehiculoModelo(val);
-                            }
-                          }}
-                          className="w-full bg-[#111] border border-neutral-800 focus:border-red-600 focus:outline-none rounded-lg px-3 py-2 text-xs text-white font-medium"
-                        >
-                          <option value="">-- Seleccionar Marca y Modelo de Argentina --</option>
-                          {VEHICULOS_POR_MARCA.map((grupo) => (
-                            <optgroup key={grupo.marca} label={`🚗 ${grupo.marca}`}>
-                              {grupo.modelos.map((mod) => (
-                                <option key={mod} value={mod}>
-                                  {mod}
-                                </option>
-                              ))}
-                            </optgroup>
-                          ))}
-                          <option value="OTRO">✏️ OTRO VEHÍCULO (No está en la lista / Tipear a mano)</option>
-                        </select>
-
-                        {/* Si eligió OTRO o si es un vehículo personalizado */}
-                        {(modoVehiculoOtro ||
-                          (!VEHICULOS_ARGENTINA.includes(vehiculoModelo) && vehiculoModelo !== '')) && (
-                          <div className="pt-0.5">
-                            <input
-                              type="text"
-                              required
-                              placeholder="Escribí la marca y modelo (ej: Ford Falcon, Torino, BMW, etc.)"
-                              value={vehiculoModelo}
-                              onChange={(e) => setVehiculoModelo(e.target.value)}
-                              className="w-full bg-[#161616] border border-red-600/80 focus:border-red-500 focus:outline-none rounded-lg px-3 py-1.5 text-xs text-white placeholder-neutral-400"
-                              autoFocus
-                            />
-                            <p className="text-[10px] text-neutral-400 mt-0.5">
-                              Ingreso manual: el modelo que escribas quedará registrado en el presupuesto y la planilla.
-                            </p>
-                          </div>
-                        )}
-                      </div>
+                      <select
+                        value={vehiculoModelo}
+                        onChange={(e) => setVehiculoModelo(e.target.value)}
+                        required
+                        className="w-full bg-[#111] border border-neutral-800 focus:border-red-600 focus:outline-none rounded-lg px-3 py-2 text-xs text-white font-medium"
+                      >
+                        <option value="">-- Seleccionar Marca y Modelo de Argentina --</option>
+                        {VEHICULOS_POR_MARCA.map((grupo) => (
+                          <optgroup key={grupo.marca} label={`🚗 ${grupo.marca}`}>
+                            {grupo.modelos.map((mod) => (
+                              <option key={mod} value={mod}>
+                                {mod}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ))}
+                      </select>
                     </div>
 
                     {/* KILOMETRAJE INGRESADO POR RODRIGO */}
@@ -1506,63 +1462,37 @@ export const PresupuestosManager = ({
                           </select>
 
                           {/* Descripción / Trabajo o Repuesto Desplegable */}
-                          <div className="flex-1 space-y-1.5 min-w-[210px]">
-                            {(() => {
-                              const esTrabajo = (TRABAJOS_TALLER_SERVICIOS as readonly string[]).includes(it.descripcion);
-                              const esRepuesto = (REPUESTOS_TALLER_PIEZAS as readonly string[]).includes(it.descripcion);
-                              const esPredefinido = esTrabajo || esRepuesto;
-
-                              return (
-                                <>
-                                  <select
-                                    value={esPredefinido ? it.descripcion : it.descripcion ? 'OTRO' : ''}
-                                    onChange={(e) => {
-                                      const val = e.target.value;
-                                      if (val === 'OTRO') {
-                                        actualizarItem(it.id, 'descripcion', '');
-                                      } else {
-                                        actualizarItem(it.id, 'descripcion', val);
-                                        if ((TRABAJOS_TALLER_SERVICIOS as readonly string[]).includes(val)) {
-                                          actualizarItem(it.id, 'tipo', 'mano_de_obra');
-                                        } else if ((REPUESTOS_TALLER_PIEZAS as readonly string[]).includes(val)) {
-                                          actualizarItem(it.id, 'tipo', 'repuesto');
-                                        }
-                                      }
-                                    }}
-                                    className="w-full bg-[#111] border border-neutral-800 focus:border-red-600 focus:outline-none text-xs text-white rounded px-2.5 py-1.5 font-medium"
-                                  >
-                                    <option value="">-- Seleccionar Trabajo o Repuesto --</option>
-                                    <optgroup label="🛠️ Mano de Obra y Servicios de Taller">
-                                      {TRABAJOS_TALLER_SERVICIOS.map((s) => (
-                                        <option key={s} value={s}>
-                                          {s}
-                                        </option>
-                                      ))}
-                                    </optgroup>
-                                    <optgroup label="🔩 Repuestos y Piezas">
-                                      {REPUESTOS_TALLER_PIEZAS.map((r) => (
-                                        <option key={r} value={r}>
-                                          {r}
-                                        </option>
-                                      ))}
-                                    </optgroup>
-                                    <option value="OTRO">✏️ OTRO (Escribir trabajo o repuesto a mano)</option>
-                                  </select>
-
-                                  {(!esPredefinido || it.descripcion === '') && (
-                                    <input
-                                      type="text"
-                                      required
-                                      placeholder="Escribí acá el trabajo o repuesto a mano..."
-                                      value={it.descripcion}
-                                      onChange={(e) => actualizarItem(it.id, 'descripcion', e.target.value)}
-                                      className="w-full bg-[#161616] border border-red-600/80 focus:border-red-500 focus:outline-none text-xs text-white rounded px-3 py-1.5 placeholder-neutral-500"
-                                      autoFocus={it.descripcion === ''}
-                                    />
-                                  )}
-                                </>
-                              );
-                            })()}
+                          <div className="flex-1 min-w-[210px]">
+                            <select
+                              value={it.descripcion}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                actualizarItem(it.id, 'descripcion', val);
+                                if ((TRABAJOS_TALLER_SERVICIOS as readonly string[]).includes(val)) {
+                                  actualizarItem(it.id, 'tipo', 'mano_de_obra');
+                                } else if ((REPUESTOS_TALLER_PIEZAS as readonly string[]).includes(val)) {
+                                  actualizarItem(it.id, 'tipo', 'repuesto');
+                                }
+                              }}
+                              required
+                              className="w-full bg-[#111] border border-neutral-800 focus:border-red-600 focus:outline-none text-xs text-white rounded px-2.5 py-2 font-medium"
+                            >
+                              <option value="">-- Seleccionar Trabajo o Repuesto --</option>
+                              <optgroup label="🛠️ Mano de Obra y Servicios de Taller">
+                                {TRABAJOS_TALLER_SERVICIOS.map((s) => (
+                                  <option key={s} value={s}>
+                                    {s}
+                                  </option>
+                                ))}
+                              </optgroup>
+                              <optgroup label="🔩 Repuestos y Piezas">
+                                {REPUESTOS_TALLER_PIEZAS.map((r) => (
+                                  <option key={r} value={r}>
+                                    {r}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            </select>
                           </div>
 
                           {/* Cantidad */}

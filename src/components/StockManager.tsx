@@ -57,7 +57,6 @@ export const StockManager = ({
   // MÓDULO 2: Filtros de catálogo de inventario
   const [searchCatalogo, setSearchCatalogo] = useState('');
   const [filtroEstadoStock, setFiltroEstadoStock] = useState<'todos' | 'con_stock' | 'bajo_stock' | 'sin_stock'>('todos');
-  const [vistaModulo2, setVistaModulo2] = useState<'inventario' | 'historial_compras'>('inventario');
 
   // Modals de Módulo 1 (Cargar Repuesto Utilizado)
   const [showModalUsado, setShowModalUsado] = useState(false);
@@ -1011,48 +1010,36 @@ export const StockManager = ({
             </div>
           </div>
 
-          {/* SUB-PESTAÑAS DEL MÓDULO 2: INVENTARIO vs HISTORIAL DE COMPRAS */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-2 p-1 bg-neutral-900 rounded-xl">
-              <button
-                type="button"
-                onClick={() => setVistaModulo2('inventario')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-heading font-bold uppercase transition-all cursor-pointer ${
-                  vistaModulo2 === 'inventario'
-                    ? 'bg-emerald-600 text-white shadow'
-                    : 'text-neutral-400 hover:text-white'
-                }`}
-              >
-                <Package className="w-3.5 h-3.5" />
-                <span>Inventario Físico en Taller ({stockList.length})</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setVistaModulo2('historial_compras')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-heading font-bold uppercase transition-all cursor-pointer ${
-                  vistaModulo2 === 'historial_compras'
-                    ? 'bg-emerald-600 text-white shadow'
-                    : 'text-neutral-400 hover:text-white'
-                }`}
-              >
-                <Truck className="w-3.5 h-3.5" />
-                <span>Historial de Compras Realizadas ({comprasRepuestos.length})</span>
-              </button>
+          {/* ACCIONES DEL MÓDULO 2 */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="text-xs text-neutral-400 font-heading font-bold uppercase tracking-wider flex items-center gap-2">
+              <Package className="w-4 h-4 text-emerald-400" />
+              <span>Inventario Físico en Taller ({stockList.length} repuestos)</span>
             </div>
 
-            <button
-              type="button"
-              onClick={() => abrirModalCompraParaItem()}
-              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-heading font-black text-xs uppercase cursor-pointer shadow-lg shadow-emerald-600/30"
-            >
-              <ShoppingCart className="w-4 h-4" />
-              <span>+ Registrar Nueva Compra</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={abrirModalNuevoItemCatalogo}
+                className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-300 font-heading font-bold text-xs uppercase cursor-pointer border border-neutral-700 transition-colors"
+              >
+                <PlusCircle className="w-4 h-4 text-emerald-400" />
+                <span>+ Nueva Pieza Catálogo</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => abrirModalCompraParaItem()}
+                className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-heading font-black text-xs uppercase cursor-pointer shadow-lg shadow-emerald-600/30"
+              >
+                <ShoppingCart className="w-4 h-4" />
+                <span>+ Registrar Nueva Compra</span>
+              </button>
+            </div>
           </div>
 
-          {/* SUBVISTA A: INVENTARIO FÍSICO */}
-          {vistaModulo2 === 'inventario' && (
-            <div className="p-6 rounded-2xl bg-[#0a0a0a] border border-neutral-800 shadow-xl space-y-4">
+          {/* INVENTARIO FÍSICO */}
+          <div className="p-6 rounded-2xl bg-[#0a0a0a] border border-neutral-800 shadow-xl space-y-4">
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
                 {/* Buscador */}
                 <div className="relative flex-1">
@@ -1251,105 +1238,6 @@ export const StockManager = ({
                 </table>
               </div>
             </div>
-          )}
-
-          {/* SUBVISTA B: HISTORIAL DE COMPRAS REALIZADAS */}
-          {vistaModulo2 === 'historial_compras' && (
-            <div className="p-6 rounded-2xl bg-[#0a0a0a] border border-neutral-800 shadow-xl space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-base font-heading font-black text-white uppercase tracking-tight">
-                    Historial de Compras de Repuestos Realizadas
-                  </h3>
-                  <p className="text-xs text-neutral-400 mt-0.5">
-                    Registro de todas las compras ingresadas al taller con su respectivo gasto en Contabilidad.
-                  </p>
-                </div>
-
-                <div className="font-mono text-sm font-black text-emerald-400 bg-neutral-900 px-3.5 py-1.5 rounded-xl border border-neutral-800">
-                  Total Invertido: ${totalInvertidoCompras.toLocaleString('es-AR')}
-                </div>
-              </div>
-
-              <div className="overflow-x-auto rounded-xl border border-neutral-800">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-neutral-900 text-neutral-400 font-heading font-bold uppercase tracking-wider border-b border-neutral-800">
-                    <tr>
-                      <th className="py-3.5 px-4">Fecha</th>
-                      <th className="py-3.5 px-4">Repuesto Comprado</th>
-                      <th className="py-3.5 px-4 text-center">Cantidad</th>
-                      <th className="py-3.5 px-4">Proveedor / Repuestero</th>
-                      <th className="py-3.5 px-4 text-right">Costo Unit.</th>
-                      <th className="py-3.5 px-4 text-right">Total Pagado</th>
-                      <th className="py-3.5 px-4">Medio de Pago</th>
-                      <th className="py-3.5 px-4 text-center">Contabilidad</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-neutral-800/80">
-                    {comprasRepuestos.length === 0 ? (
-                      <tr>
-                        <td colSpan={8} className="py-12 text-center text-neutral-500">
-                          <Truck className="w-8 h-8 mx-auto mb-2 text-neutral-600" />
-                          <span>Aún no hay compras de stock registradas.</span>
-                          <div className="mt-3">
-                            <button
-                              type="button"
-                              onClick={() => abrirModalCompraParaItem()}
-                              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-heading font-bold text-xs uppercase cursor-pointer"
-                            >
-                              <ShoppingCart className="w-3.5 h-3.5" />
-                              <span>Registrar primera compra</span>
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ) : (
-                      comprasRepuestos.map((compra) => (
-                        <tr key={compra.id} className="hover:bg-neutral-900/50 transition-colors">
-                          <td className="py-3.5 px-4 font-mono text-neutral-300 whitespace-nowrap">
-                            {formatearFechaArgentina(compra.fecha)}
-                          </td>
-                          <td className="py-3.5 px-4">
-                            <strong className="font-heading font-black text-white uppercase text-sm block">
-                              {compra.repuestoNombre}
-                            </strong>
-                            <span className="text-[10px] text-neutral-400 block font-mono">
-                              {compra.vehiculoCompatibilidad || 'Multimarca'}
-                            </span>
-                          </td>
-                          <td className="py-3.5 px-4 text-center font-mono font-bold text-emerald-400">
-                            +{compra.cantidad} unid.
-                          </td>
-                          <td className="py-3.5 px-4 text-neutral-300">
-                            {compra.proveedor || 'Sin especificar'}
-                          </td>
-                          <td className="py-3.5 px-4 text-right font-mono text-neutral-400">
-                            ${compra.costoUnitario?.toLocaleString('es-AR') || '-'}
-                          </td>
-                          <td className="py-3.5 px-4 text-right font-mono font-black text-rose-400">
-                            -${compra.costoTotal.toLocaleString('es-AR')}
-                          </td>
-                          <td className="py-3.5 px-4 text-neutral-300 font-medium">
-                            {compra.metodoPago}
-                          </td>
-                          <td className="py-3.5 px-4 text-center">
-                            {compra.impactaContabilidad ? (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-heading font-bold uppercase bg-emerald-950 text-emerald-300 border border-emerald-800">
-                                <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                                <span>Cargado en Gastos</span>
-                              </span>
-                            ) : (
-                              <span className="text-neutral-500 text-[10px]">No cargado</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
         </div>
       )}
 

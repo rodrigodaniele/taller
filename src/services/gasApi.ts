@@ -675,6 +675,13 @@ export const gasApi = {
       localStorage.setItem('taller_stock_v1', JSON.stringify(list));
       localStorage.setItem('taller_repuestos_usados_v1', JSON.stringify(listaUsados));
 
+      // Sincronizar en segundo plano con Google Sheets (hoja Repuestos_Utilizados)
+      for (const repUso of listaUsados.slice(0, repuestos.length)) {
+        try {
+          await callGasApi({ accion: 'registrarRepuestoUsado', uso: repUso });
+        } catch {}
+      }
+
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('taller_stock_sync'));
         if (typeof BroadcastChannel !== 'undefined') {
@@ -691,9 +698,19 @@ export const gasApi = {
   },
 
   /**
-   * MÓDULO 1: Obtener lista de repuestos utilizados / consumidos en taller
+   * MÓDULO 1: Obtener lista de repuestos utilizados / consumidos en taller (desde Google Sheets hoja Repuestos_Utilizados)
    */
   async getRepuestosUsados(): Promise<{ success: boolean; items: RepuestoUsado[] }> {
+    try {
+      const res = await callGasApi({ accion: 'obtenerRepuestosUsados' });
+      if (res && res.resultado === 'ok' && Array.isArray(res.items)) {
+        localStorage.setItem('taller_repuestos_usados_v1', JSON.stringify(res.items));
+        return { success: true, items: res.items };
+      }
+    } catch (e) {
+      console.warn('Conexión con Google Sheets para repuestos usados no disponible, leyendo caché local:', e);
+    }
+
     try {
       const saved = localStorage.getItem('taller_repuestos_usados_v1');
       const list: RepuestoUsado[] = saved ? JSON.parse(saved) : [];
@@ -705,22 +722,22 @@ export const gasApi = {
   },
 
   /**
-   * MÓDULO 1: Registrar manualmente un repuesto utilizado (descuenta stock, NO impacta en contabilidad)
+   * MÓDULO 1: Registrar manualmente un repuesto utilizado (descuenta stock físico si existe, NO impacta en contabilidad)
    */
   async registrarRepuestoUsado(
     uso: Omit<RepuestoUsado, 'id'>
   ): Promise<{ success: boolean; item: RepuestoUsado; error?: string }> {
     try {
-      const id = 'USO-' + Date.now();
+      const id = 'USO-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
       const nuevoUso: RepuestoUsado = { ...uso, id };
 
-      // 1. Guardar en lista de consumos/rotación
+      // 1. Guardar en lista de consumos/rotación local
       const savedUsados = localStorage.getItem('taller_repuestos_usados_v1');
       const listaUsados: RepuestoUsado[] = savedUsados ? JSON.parse(savedUsados) : [];
       listaUsados.unshift(nuevoUso);
       localStorage.setItem('taller_repuestos_usados_v1', JSON.stringify(listaUsados));
 
-      // 2. Descontar del inventario físico y sumar a la rotación histórica
+      // 2. Descontar del inventario físico si existe stock y sumar a rotación
       const savedStock = localStorage.getItem('taller_stock_v1');
       const listStock: ItemStock[] = savedStock ? JSON.parse(savedStock) : [];
       const cant = Number(uso.cantidad) || 1;
@@ -769,6 +786,13 @@ export const gasApi = {
         }
       }
 
+      // 4. Guardar en Google Sheets (hoja Repuestos_Utilizados y actualizar hoja Stock)
+      try {
+        await callGasApi({ accion: 'registrarRepuestoUsado', uso: nuevoUso });
+      } catch (sheetErr) {
+        console.warn('Guardado en caché local, se sincronizará al conectar con Google Sheets:', sheetErr);
+      }
+
       return { success: true, item: nuevoUso };
     } catch (err: any) {
       console.error('Error al registrar repuesto usado:', err);
@@ -808,6 +832,11 @@ export const gasApi = {
         const filtered = listaUsados.filter((x) => x.id !== id);
         localStorage.setItem('taller_repuestos_usados_v1', JSON.stringify(filtered));
       }
+
+      // Sincronizar borrado con Google Sheets
+      try {
+        await callGasApi({ accion: 'eliminarRepuestoUsado', id });
+      } catch {}
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('taller_stock_sync'));

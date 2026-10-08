@@ -168,6 +168,7 @@ export const VEHICULOS_POR_MARCA: MarcaVehiculo[] = [
     modelos: [
       'Mercedes-Benz Sprinter',
       'Iveco Daily',
+      'OTRO VEHÍCULO (NO LISTADO)',
     ],
   },
 ];
