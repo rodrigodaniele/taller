@@ -54,8 +54,10 @@ export const StockManager = ({
   const [searchUsados, setSearchUsados] = useState('');
   const [filtroOrigenUsados, setFiltroOrigenUsados] = useState<'todos' | 'manual' | 'facturacion'>('todos');
 
-  // MÓDULO 2: Filtros de catálogo de inventario
+  // MÓDULO 2: Vista activa e inventario / compras
+  const [subModulo2, setSubModulo2] = useState<'inventario' | 'historial_compras'>('inventario');
   const [searchCatalogo, setSearchCatalogo] = useState('');
+  const [searchCompras, setSearchCompras] = useState('');
   const [filtroEstadoStock, setFiltroEstadoStock] = useState<'todos' | 'con_stock' | 'bajo_stock' | 'sin_stock'>('todos');
 
   // Modals de Módulo 1 (Cargar Repuesto Utilizado)
@@ -100,6 +102,7 @@ export const StockManager = ({
 
   const searchInputId = useId();
   const searchUsadosId = useId();
+  const searchComprasId = useId();
 
   // Carga inicial y listeners de sincronización
   const cargarListas = async () => {
@@ -365,8 +368,23 @@ export const StockManager = ({
     }
   };
 
-  // ----------------------------------------------------
-  // MANEJADORES: CATÁLOGO DE PIEZAS (ALTA / EDICIÓN MANUAL)
+  const handleEliminarCompra = async (id: string, repuestoNombre: string, cantidad: number) => {
+    if (
+      !confirm(
+        `¿Eliminar este registro de compra de "${repuestoNombre}" (${cantidad} unid.) del historial?\n\n(No modificará el stock actual ya existente)`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      await gasApi.eliminarCompraRepuesto(id);
+      await cargarListas();
+      onShowToast('info', 'Compra eliminada', `Se eliminó el registro de compra de ${repuestoNombre}.`);
+    } catch (err: any) {
+      onShowToast('error', 'Error al eliminar', err.message);
+    }
+  };
   // ----------------------------------------------------
   const abrirModalNuevoItemCatalogo = () => {
     setItemEnEdicion(null);
@@ -538,6 +556,18 @@ export const StockManager = ({
     if (filtroEstadoStock === 'bajo_stock') return it.stockActual > 0 && it.stockActual <= it.stockMinimo;
     if (filtroEstadoStock === 'sin_stock') return it.stockActual === 0;
     return true;
+  });
+
+  // Módulo 2: Historial de Compras de Repuestos
+  const filteredCompras = comprasRepuestos.filter((c) => {
+    const term = searchCompras.toLowerCase().trim();
+    if (!term) return true;
+    const r = (c.repuestoNombre || '').toLowerCase();
+    const v = (c.vehiculoCompatibilidad || '').toLowerCase();
+    const p = (c.proveedor || '').toLowerCase();
+    const f = (c.fecha || '').toLowerCase();
+    const cat = (c.categoria || '').toLowerCase();
+    return r.includes(term) || v.includes(term) || p.includes(term) || f.includes(term) || cat.includes(term);
   });
 
   return (
@@ -1010,11 +1040,33 @@ export const StockManager = ({
             </div>
           </div>
 
-          {/* ACCIONES DEL MÓDULO 2 */}
+          {/* SELECTOR DE VISTA Y ACCIONES DEL MÓDULO 2 */}
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="text-xs text-neutral-400 font-heading font-bold uppercase tracking-wider flex items-center gap-2">
-              <Package className="w-4 h-4 text-emerald-400" />
-              <span>Inventario Físico en Taller ({stockList.length} repuestos)</span>
+            <div className="flex items-center gap-1.5 p-1 bg-neutral-900 border border-neutral-800 rounded-xl">
+              <button
+                type="button"
+                onClick={() => setSubModulo2('inventario')}
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-heading font-black uppercase tracking-wider transition-all cursor-pointer ${
+                  subModulo2 === 'inventario'
+                    ? 'bg-emerald-600 text-white shadow'
+                    : 'text-neutral-400 hover:text-white hover:bg-neutral-800'
+                }`}
+              >
+                <Package className="w-4 h-4" />
+                <span>Inventario Físico ({stockList.length})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSubModulo2('historial_compras')}
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-heading font-black uppercase tracking-wider transition-all cursor-pointer ${
+                  subModulo2 === 'historial_compras'
+                    ? 'bg-emerald-600 text-white shadow'
+                    : 'text-neutral-400 hover:text-white hover:bg-neutral-800'
+                }`}
+              >
+                <ShoppingCart className="w-4 h-4" />
+                <span>Historial de Compras ({comprasRepuestos.length})</span>
+              </button>
             </div>
 
             <div className="flex items-center gap-2">
@@ -1038,7 +1090,8 @@ export const StockManager = ({
             </div>
           </div>
 
-          {/* INVENTARIO FÍSICO */}
+          {/* TAB 1: INVENTARIO FÍSICO */}
+          {subModulo2 === 'inventario' && (
           <div className="p-6 rounded-2xl bg-[#0a0a0a] border border-neutral-800 shadow-xl space-y-4">
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
                 {/* Buscador */}
@@ -1238,6 +1291,120 @@ export const StockManager = ({
                 </table>
               </div>
             </div>
+          )}
+
+          {/* TAB 2: HISTORIAL DE COMPRAS DE REPUESTOS */}
+          {subModulo2 === 'historial_compras' && (
+            <div className="p-6 rounded-2xl bg-[#0a0a0a] border border-neutral-800 shadow-xl space-y-4">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                {/* Buscador */}
+                <div className="relative flex-1">
+                  <label htmlFor={searchComprasId} className="sr-only">
+                    Buscar compra de repuesto
+                  </label>
+                  <Search className="w-4 h-4 text-neutral-500 absolute left-4 top-3.5" />
+                  <input
+                    id={searchComprasId}
+                    type="text"
+                    placeholder="BUSCAR EN COMPRAS POR PIEZA, VEHÍCULO, PROVEEDOR O FECHA..."
+                    value={searchCompras}
+                    onChange={(e) => setSearchCompras(e.target.value)}
+                    className="w-full bg-[#111] border border-neutral-800 focus:border-emerald-600 focus:outline-none rounded-xl pl-11 pr-4 py-3 text-sm font-heading font-bold text-white placeholder-neutral-600 uppercase tracking-wider transition-colors shadow-inner"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2 text-xs font-mono font-bold text-emerald-400 bg-emerald-950/40 border border-emerald-900/60 px-3.5 py-2.5 rounded-xl shrink-0">
+                  <span>{filteredCompras.length} compras registradas</span>
+                </div>
+              </div>
+
+              {/* TABLA DE COMPRAS REGISTRADAS */}
+              <div className="overflow-x-auto rounded-xl border border-neutral-800">
+                <table className="w-full text-left text-xs text-neutral-300">
+                  <thead className="bg-[#111] text-neutral-400 font-heading font-bold uppercase text-[10px] tracking-wider border-b border-neutral-800">
+                    <tr>
+                      <th className="py-3 px-4">Fecha</th>
+                      <th className="py-3 px-4">Repuesto / Pieza</th>
+                      <th className="py-3 px-4">Vehículo</th>
+                      <th className="py-3 px-4 text-center">Cant.</th>
+                      <th className="py-3 px-4 text-right">Costo Unit.</th>
+                      <th className="py-3 px-4 text-right">Total Pagado</th>
+                      <th className="py-3 px-4">Proveedor / Pago</th>
+                      <th className="py-3 px-4 text-center">Contabilidad</th>
+                      <th className="py-3 px-4 text-right">Acción</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-neutral-800/80 font-mono">
+                    {filteredCompras.length === 0 ? (
+                      <tr>
+                        <td colSpan={9} className="py-12 text-center text-neutral-500 font-sans">
+                          <ShoppingCart className="w-8 h-8 mx-auto mb-2 opacity-30 text-emerald-400" />
+                          <p className="font-heading font-bold uppercase text-xs text-neutral-400">
+                            No se encontraron compras registradas en esta vista
+                          </p>
+                          <p className="text-[11px] text-neutral-500 mt-1">
+                            Hacé clic en &ldquo;+ Registrar Nueva Compra&rdquo; para registrar compras a proveedores en la hoja Compras_Repuestos.
+                          </p>
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredCompras.map((compra) => (
+                        <tr key={compra.id} className="hover:bg-neutral-900/40 transition-colors">
+                          <td className="py-3 px-4 text-neutral-400 whitespace-nowrap">
+                            {formatearFechaArgentina(compra.fecha)}
+                          </td>
+                          <td className="py-3 px-4 font-bold text-white font-sans">
+                            {compra.repuestoNombre}
+                          </td>
+                          <td className="py-3 px-4 text-neutral-400 font-sans">
+                            {compra.vehiculoCompatibilidad || 'Multimarca'}
+                          </td>
+                          <td className="py-3 px-4 text-center font-black text-emerald-400">
+                            +{compra.cantidad}
+                          </td>
+                          <td className="py-3 px-4 text-right text-neutral-300">
+                            ${compra.costoUnitario > 0 ? compra.costoUnitario.toLocaleString('es-AR') : '-'}
+                          </td>
+                          <td className="py-3 px-4 text-right font-bold text-emerald-300">
+                            ${compra.costoTotal > 0 ? compra.costoTotal.toLocaleString('es-AR') : '-'}
+                          </td>
+                          <td className="py-3 px-4 text-neutral-400 font-sans">
+                            <span className="text-white block font-medium">
+                              {compra.proveedor || 'Sin especificar'}
+                            </span>
+                            <span className="text-[10px] text-neutral-500">
+                              {compra.metodoPago || 'Efectivo'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-center font-sans">
+                            {compra.impactaContabilidad ? (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800">
+                                SÍ (-${compra.costoTotal?.toLocaleString('es-AR')})
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-neutral-800 text-neutral-400">
+                                NO
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleEliminarCompra(compra.id, compra.repuestoNombre, compra.cantidad)}
+                              className="p-1.5 rounded-lg bg-neutral-900 hover:bg-red-950 border border-neutral-800 hover:border-red-800 text-neutral-400 hover:text-red-400 transition-colors cursor-pointer"
+                              title="Eliminar compra del historial"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

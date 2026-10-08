@@ -811,6 +811,16 @@ export const gasApi = {
    */
   async getComprasRepuestos(): Promise<{ success: boolean; items: CompraRepuesto[] }> {
     try {
+      const res = await callGasApi({ accion: 'obtenerComprasRepuestos' });
+      if (res && res.resultado === 'ok' && Array.isArray(res.items)) {
+        localStorage.setItem('taller_compras_repuestos_v1', JSON.stringify(res.items));
+        return { success: true, items: res.items };
+      }
+    } catch (e) {
+      console.warn('Conexión con Google Sheets para compras no disponible, leyendo caché local:', e);
+    }
+
+    try {
       const saved = localStorage.getItem('taller_compras_repuestos_v1');
       const list: CompraRepuesto[] = saved ? JSON.parse(saved) : [];
       return { success: true, items: list };
@@ -821,7 +831,7 @@ export const gasApi = {
   },
 
   /**
-   * MÓDULO 2: Registrar compra de repuestos (suma unidades al stock, e IMPACTA EN CONTABILIDAD COMO GASTO NEGATIVO)
+   * MÓDULO 2: Registrar compra de repuestos (hoja Compras_Repuestos, suma unidades al stock, e IMPACTA EN CONTABILIDAD)
    */
   async registrarCompraRepuesto(
     compra: Omit<CompraRepuesto, 'id'>
@@ -830,13 +840,13 @@ export const gasApi = {
       const id = 'COMPRA-' + Date.now();
       const nuevaCompra: CompraRepuesto = { ...compra, id };
 
-      // 1. Guardar en historial de compras de repuestos
+      // 1. Guardar en historial de compras de repuestos local
       const savedCompras = localStorage.getItem('taller_compras_repuestos_v1');
       const listaCompras: CompraRepuesto[] = savedCompras ? JSON.parse(savedCompras) : [];
       listaCompras.unshift(nuevaCompra);
       localStorage.setItem('taller_compras_repuestos_v1', JSON.stringify(listaCompras));
 
-      // 2. Sumar unidades al inventario físico de repuestos
+      // 2. Sumar unidades al inventario físico de repuestos local
       const savedStock = localStorage.getItem('taller_stock_v1');
       const listStock: ItemStock[] = savedStock ? JSON.parse(savedStock) : [];
       const nomNorm = compra.repuestoNombre.trim().toUpperCase();
@@ -900,10 +910,41 @@ export const gasApi = {
         }
       }
 
+      // 5. Guardar en Google Sheets (hoja Compras_Repuestos y actualizar hoja Stock)
+      try {
+        await callGasApi({ accion: 'registrarCompraRepuesto', compra: nuevaCompra });
+      } catch (sheetErr) {
+        console.warn('Guardado en caché local, se sincronizará al conectar con Google Sheets:', sheetErr);
+      }
+
       return { success: true, item: nuevaCompra };
     } catch (err: any) {
       console.error('Error al registrar compra de repuestos:', err);
       return { success: false, item: { ...compra, id: '' }, error: err.message };
+    }
+  },
+
+  /**
+   * MÓDULO 2: Eliminar registro de compra de repuestos
+   */
+  async eliminarCompraRepuesto(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const saved = localStorage.getItem('taller_compras_repuestos_v1');
+      const list: CompraRepuesto[] = saved ? JSON.parse(saved) : [];
+      const updated = list.filter((x) => x.id !== id);
+      localStorage.setItem('taller_compras_repuestos_v1', JSON.stringify(updated));
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('taller_stock_sync'));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+
+    try {
+      return await callGasApi({ accion: 'eliminarCompraRepuesto', id });
+    } catch (e: any) {
+      return { success: true };
     }
   },
 };

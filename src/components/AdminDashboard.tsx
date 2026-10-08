@@ -1737,6 +1737,24 @@ function doPost(e) {
       var resDelUso = eliminarRepuestoUsadoSheet(datos.id);
       return ContentService.createTextOutput(JSON.stringify(resDelUso)).setMimeType(ContentService.MimeType.JSON);
     }
+
+    // --- ACCIÓN 26: OBTENER COMPRAS DE REPUESTOS (MÓDULO 2 - HOJA COMPRAS_REPUESTOS) ---
+    if (datos.accion === "obtenerComprasRepuestos") {
+      var resCompras = obtenerComprasRepuestosSheet();
+      return ContentService.createTextOutput(JSON.stringify(resCompras)).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // --- ACCIÓN 27: REGISTRAR COMPRA DE REPUESTOS (MÓDULO 2 - HOJA COMPRAS_REPUESTOS & SUMA A STOCK) ---
+    if (datos.accion === "registrarCompraRepuesto") {
+      var resRegCompra = registrarCompraRepuestoSheet(datos.compra);
+      return ContentService.createTextOutput(JSON.stringify(resRegCompra)).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // --- ACCIÓN 28: ELIMINAR COMPRA DE REPUESTOS (MÓDULO 2) ---
+    if (datos.accion === "eliminarCompraRepuesto") {
+      var resDelCompra = eliminarCompraRepuestoSheet(datos.id);
+      return ContentService.createTextOutput(JSON.stringify(resDelCompra)).setMimeType(ContentService.MimeType.JSON);
+    }
                            
   } catch(error) {
     return ContentService.createTextOutput(JSON.stringify({"resultado": "error", "mensaje": error.toString()})).setMimeType(ContentService.MimeType.JSON);
@@ -2468,6 +2486,152 @@ function ingresarCompraStockSheet(datos) {
       metodoPago: datos.metodoPago || "Efectivo",
       referencia: "STOCK REPUESTOS"
     });
+  }
+  return { resultado: "ok", success: true };
+}
+
+function obtenerComprasRepuestosSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Compras_Repuestos");
+  if (!sheet) {
+    sheet = ss.insertSheet("Compras_Repuestos");
+    sheet.appendRow(["ID", "Fecha", "Repuesto", "Vehiculo", "Categoria", "Cantidad", "CostoUnitario", "CostoTotal", "Proveedor", "MetodoPago", "ImpactaContabilidad", "Comprobante"]);
+    return { resultado: "ok", items: [] };
+  }
+  var data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return { resultado: "ok", items: [] };
+  var items = [];
+  for (var i = 1; i < data.length; i++) {
+    var r = data[i];
+    if (r[0] || r[2]) {
+      items.push({
+        id: String(r[0] || "COMPRA-" + i),
+        fecha: formatearFechaParaAppsScript(r[1]) || String(r[1] || ""),
+        repuestoNombre: String(r[2] || ""),
+        vehiculoCompatibilidad: String(r[3] || ""),
+        categoria: String(r[4] || "Tren Delantero / Suspensión"),
+        cantidad: Number(r[5]) || 0,
+        costoUnitario: Number(r[6]) || 0,
+        costoTotal: Number(r[7]) || 0,
+        proveedor: String(r[8] || ""),
+        metodoPago: String(r[9] || "Efectivo"),
+        impactaContabilidad: String(r[10]).toUpperCase() === "SI" || r[10] === true,
+        comprobante: String(r[11] || "")
+      });
+    }
+  }
+  items.reverse();
+  return { resultado: "ok", items: items };
+}
+
+function registrarCompraRepuestoSheet(compra) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetCompras = ss.getSheetByName("Compras_Repuestos") || ss.insertSheet("Compras_Repuestos");
+  if (sheetCompras.getLastRow() === 0) {
+    sheetCompras.appendRow(["ID", "Fecha", "Repuesto", "Vehiculo", "Categoria", "Cantidad", "CostoUnitario", "CostoTotal", "Proveedor", "MetodoPago", "ImpactaContabilidad", "Comprobante"]);
+  }
+
+  var id = compra.id || ("COMPRA-" + new Date().getTime());
+  var fechaFmt = compra.fecha ? formatearFechaParaAppsScript(compra.fecha) : getFechaHoyArgentinaAppsScript();
+  var repuestoNom = String(compra.repuestoNombre || "").trim().toUpperCase();
+  var veh = String(compra.vehiculoCompatibilidad || "").trim();
+  var cat = String(compra.categoria || "Tren Delantero / Suspensión").trim();
+  var cant = Number(compra.cantidad) || 0;
+  var costoUnit = Number(compra.costoUnitario) || 0;
+  var costoTotal = Number(compra.costoTotal) || 0;
+  var prov = String(compra.proveedor || "").trim();
+  var metodo = String(compra.metodoPago || "Efectivo").trim();
+  var impactaCont = compra.impactaContabilidad === true;
+  var comp = String(compra.comprobante || "").trim();
+
+  // 1. Guardar fila en Compras_Repuestos
+  sheetCompras.appendRow([
+    id,
+    "'" + fechaFmt,
+    repuestoNom,
+    veh,
+    cat,
+    cant,
+    costoUnit,
+    costoTotal,
+    prov,
+    metodo,
+    impactaCont ? "SI" : "NO",
+    comp
+  ]);
+
+  // 2. Sumar unidades e impactar en hoja 'Stock'
+  var sheetStock = ss.getSheetByName("Stock") || ss.insertSheet("Stock");
+  if (sheetStock.getLastRow() === 0) {
+    sheetStock.appendRow(["ID", "Nombre", "Categoria", "VehiculoCompatibilidad", "StockActual", "StockMinimo", "CostoUnitario", "PrecioVenta", "TotalInstalados", "UltimoMovimiento"]);
+  }
+
+  var dataStock = sheetStock.getDataRange().getValues();
+  var filaStockEncontrada = -1;
+  var repuestoSimple = repuestoNom.split(" - ")[0].trim();
+
+  for (var s = 1; s < dataStock.length; s++) {
+    var nomEnStock = String(dataStock[s][1] || "").trim().toUpperCase();
+    var vehEnStock = String(dataStock[s][3] || "").trim().toUpperCase();
+
+    if (nomEnStock === repuestoNom || (veh && nomEnStock === (repuestoNom + " - " + veh.toUpperCase())) || (veh && nomEnStock === (repuestoSimple + " - " + veh.toUpperCase()))) {
+      filaStockEncontrada = s + 1;
+      break;
+    }
+  }
+
+  if (filaStockEncontrada > 0) {
+    var stockPrev = Number(dataStock[filaStockEncontrada - 1][4]) || 0;
+    var nuevoStock = stockPrev + cant;
+    sheetStock.getRange(filaStockEncontrada, 5).setValue(nuevoStock);
+    if (costoUnit > 0) {
+      sheetStock.getRange(filaStockEncontrada, 7).setValue(costoUnit);
+    }
+    sheetStock.getRange(filaStockEncontrada, 10).setValue("'" + fechaFmt);
+  } else {
+    // Si no existía, darlo de alta en el catálogo Stock
+    var pVenta = costoUnit > 0 ? Math.round(costoUnit * 1.4) : 0;
+    sheetStock.appendRow([
+      "STOCK-" + new Date().getTime(),
+      repuestoNom,
+      cat,
+      veh || "Multimarca",
+      cant,
+      2,
+      costoUnit,
+      pVenta,
+      0,
+      "'" + fechaFmt
+    ]);
+  }
+
+  // 3. Impactar en Contabilidad si se solicitó
+  if (impactaCont && costoTotal > 0) {
+    registrarMovimientoContabilidad({
+      id: "MOV-STOCK-" + new Date().getTime(),
+      fecha: fechaFmt,
+      tipo: "gasto",
+      concepto: "Compra Repuestos: " + cant + "x " + repuestoNom + (prov ? (" (" + prov + ")") : ""),
+      categoria: "Repuestos / Repuesteros",
+      monto: costoTotal,
+      metodoPago: metodo,
+      referencia: comp ? ("COMPROBANTE " + comp) : "STOCK TALLER"
+    });
+  }
+
+  return { resultado: "ok", success: true, item: compra };
+}
+
+function eliminarCompraRepuestoSheet(id) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Compras_Repuestos");
+  if (!sheet) return { resultado: "ok", success: true };
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === String(id)) {
+      sheet.deleteRow(i + 1);
+      break;
+    }
   }
   return { resultado: "ok", success: true };
 }
