@@ -19,7 +19,8 @@ import {
   Filter,
   RefreshCw,
   Mail,
-  AlertTriangle
+  AlertTriangle,
+  Sparkles
 } from 'lucide-react';
 import { CuentaCorrienteItem } from '../types';
 import { gasApi, WHATSAPP_PHONE } from '../services/gasApi';
@@ -68,6 +69,20 @@ export const CuentasCorrientesManager: React.FC<CuentasCorrientesManagerProps> =
 
   // Estado de procesamiento de Mercado Pago (Cliente)
   const [procesandoMPId, setProcesandoMPId] = useState<string | null>(null);
+  const [modalMercadoPago, setModalMercadoPago] = useState<{
+    isOpen: boolean;
+    item: CuentaCorrienteItem | null;
+    urlPago: string | null;
+    cargando: boolean;
+    error: string | null;
+  }>({
+    isOpen: false,
+    item: null,
+    urlPago: null,
+    cargando: false,
+    error: null,
+  });
+  const [procesandoAcreditacion, setProcesandoAcreditacion] = useState<boolean>(false);
 
   // Cargar Cuentas Corrientes
   const cargarCuentas = async (silent = false) => {
@@ -327,39 +342,87 @@ export const CuentasCorrientesManager: React.FC<CuentasCorrientesManagerProps> =
     }
 
     setProcesandoMPId(item.id);
-    onShowToast('info', 'Generando pago seguro...', `Conectando con Mercado Pago para cancelar el total de $${item.saldoPendiente.toLocaleString('es-AR')}...`);
+    setModalMercadoPago({
+      isOpen: true,
+      item,
+      urlPago: null,
+      cargando: true,
+      error: null,
+    });
+    onShowToast('info', 'Conectando con Mercado Pago...', `Generando orden segura para cancelar el total de $${item.saldoPendiente.toLocaleString('es-AR')}...`);
 
     try {
-      const res = await gasApi.pagarCuentaCorrienteMercadoPago(item.id);
+      const res = await gasApi.pagarCuentaCorrienteMercadoPago(item.id, item);
       if (res.success && res.urlPago) {
-        window.location.href = res.urlPago;
-      } else {
-        // En entorno de demostración / preview si la credencial no está configurada en Sheets, ofrecer simulación de pago automático
-        const confirmarSimulacion = window.confirm(
-          `Mercado Pago: Para cancelar la totalidad de la deuda ($${item.saldoPendiente.toLocaleString('es-AR')}) del vehículo ${item.patente}.\n\n¿Deseas simular el pago aprobado inmediatamente para probar el impacto automático en Contabilidad y Cuentas Corrientes?`
-        );
+        setModalMercadoPago({
+          isOpen: true,
+          item,
+          urlPago: res.urlPago,
+          cargando: false,
+          error: null,
+        });
 
-        if (confirmarSimulacion) {
-          const cobroRes = await gasApi.cobrarCuentaCorriente(
-            item.id,
-            item.saldoPendiente,
-            'Mercado Pago (Online)',
-            'MP-TEST-ONLINE'
-          );
-          if (cobroRes.success) {
-            onShowToast(
-              'success',
-              '¡Deuda Cancelada en Mercado Pago!',
-              `Se canceló el 100% de la deuda ($${item.saldoPendiente.toLocaleString('es-AR')}) y se impactó en la Contabilidad del Taller.`
-            );
-            await cargarCuentas(true);
+        // Intentar apertura inmediata en nueva pestaña
+        try {
+          const opened = window.open(res.urlPago, '_blank', 'noopener,noreferrer');
+          if (!opened && window.top && window.top !== window) {
+            try {
+              window.top.location.href = res.urlPago;
+            } catch {}
           }
+        } catch (openErr) {
+          console.warn('Ventana bloqueada, el usuario puede presionar el botón directo del modal:', openErr);
         }
+      } else {
+        setModalMercadoPago({
+          isOpen: true,
+          item,
+          urlPago: null,
+          cargando: false,
+          error: res.error || 'No se pudo generar la orden de Mercado Pago.',
+        });
       }
     } catch (err: any) {
-      onShowToast('error', 'Error en Mercado Pago', err.message || 'No se pudo conectar.');
+      setModalMercadoPago({
+        isOpen: true,
+        item,
+        urlPago: null,
+        cargando: false,
+        error: err.message || 'Error de conexión con Mercado Pago.',
+      });
     } finally {
       setProcesandoMPId(null);
+    }
+  };
+
+  // Confirmar que el pago ya se realizó o simular pago
+  const handleConfirmarPagoOnline = async (item: CuentaCorrienteItem, esSimulacion = false) => {
+    setProcesandoAcreditacion(true);
+    try {
+      const metodo = esSimulacion ? 'Mercado Pago (Simulación Test)' : 'Mercado Pago (Online)';
+      const compRef = esSimulacion ? `MP-SIM-${Date.now()}` : `MP-ONLINE-${item.id}`;
+      const cobroRes = await gasApi.cobrarCuentaCorriente(
+        item.id,
+        item.saldoPendiente,
+        metodo,
+        compRef
+      );
+
+      if (cobroRes.success) {
+        onShowToast(
+          'success',
+          esSimulacion ? '¡Simulación de Pago Aprobada!' : '¡Deuda Cancelada con Éxito!',
+          `Se canceló la totalidad adeudada ($${item.saldoPendiente.toLocaleString('es-AR')}) y se impactó el ingreso en Contabilidad.`
+        );
+        setModalMercadoPago({ isOpen: false, item: null, urlPago: null, cargando: false, error: null });
+        await cargarCuentas(true);
+      } else {
+        onShowToast('error', 'Error al asentar', cobroRes.error || 'No se pudo asentar el cobro.');
+      }
+    } catch (e: any) {
+      onShowToast('error', 'Error', e.message || 'Error al procesar.');
+    } finally {
+      setProcesandoAcreditacion(false);
     }
   };
 
@@ -1041,6 +1104,164 @@ export const CuentasCorrientesManager: React.FC<CuentasCorrientesManagerProps> =
                 className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-heading font-black uppercase tracking-wider shadow-lg shadow-red-950 transition-all disabled:opacity-50"
               >
                 {procesandoEliminar ? 'Eliminando...' : 'Sí, Eliminar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CHECKOUT MERCADO PAGO OFICIAL (100% TOTAL, INFALIBLE) */}
+      {modalMercadoPago.isOpen && modalMercadoPago.item && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="w-full max-w-lg bg-[#0d0d0d] border border-[#009ee3]/50 rounded-3xl p-6 sm:p-7 shadow-2xl relative overflow-hidden">
+            {/* Glow decorativo de Mercado Pago */}
+            <div className="absolute top-0 right-0 w-48 h-48 bg-[#009ee3]/15 rounded-full blur-3xl pointer-events-none" />
+
+            <div className="flex items-center justify-between pb-4 border-b border-neutral-800 relative z-10">
+              <div className="flex items-center gap-3">
+                <span className="p-2.5 rounded-2xl bg-[#009ee3]/20 text-[#009ee3] border border-[#009ee3]/30">
+                  <CreditCard className="w-6 h-6" />
+                </span>
+                <div>
+                  <h3 className="font-heading font-black text-white text-base sm:text-lg uppercase tracking-wider flex items-center gap-2">
+                    <span>Mercado Pago Oficial</span>
+                    <span className="text-[10px] bg-[#009ee3]/20 text-[#009ee3] border border-[#009ee3]/40 px-2 py-0.5 rounded-full uppercase tracking-normal">
+                      Pago Total
+                    </span>
+                  </h3>
+                  <p className="text-xs text-neutral-400">Cancelación segura de cuenta corriente</p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setModalMercadoPago({ isOpen: false, item: null, urlPago: null, cargando: false, error: null })}
+                className="p-1.5 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Tarjeta de detalle de la deuda */}
+            <div className="my-5 p-4 rounded-2xl bg-neutral-900/70 border border-neutral-800/80 space-y-3 relative z-10">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-neutral-400">Vehículo:</span>
+                <span className="font-mono font-bold text-white uppercase bg-black px-2.5 py-1 rounded-lg border border-neutral-800">
+                  🚗 {modalMercadoPago.item.patente}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-neutral-400">Concepto:</span>
+                <span className="text-neutral-200 font-medium text-right max-w-[240px] truncate">
+                  {modalMercadoPago.item.concepto}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-neutral-400">Titular:</span>
+                <span className="text-neutral-200 font-medium">
+                  {modalMercadoPago.item.clienteNombre || 'Cliente del Taller'}
+                </span>
+              </div>
+              <div className="pt-3 border-t border-neutral-800/80 flex items-baseline justify-between">
+                <div>
+                  <span className="text-xs uppercase font-mono text-neutral-400 block font-bold">Total a cancelar:</span>
+                  <span className="text-[10px] text-cyan-400 font-medium">100% Saldo Deudor Completo</span>
+                </div>
+                <span className="font-mono text-2xl sm:text-3xl font-black text-emerald-400">
+                  ${modalMercadoPago.item.saldoPendiente.toLocaleString('es-AR')}
+                </span>
+              </div>
+            </div>
+
+            {/* Estado de carga */}
+            {modalMercadoPago.cargando && (
+              <div className="py-6 flex flex-col items-center justify-center gap-3 text-center relative z-10">
+                <RefreshCw className="w-8 h-8 text-[#009ee3] animate-spin" />
+                <p className="text-sm font-medium text-white">Generando orden de pago en Mercado Pago...</p>
+                <p className="text-xs text-neutral-400">Conectando de forma segura con la pasarela oficial.</p>
+              </div>
+            )}
+
+            {/* Error si lo hubiese */}
+            {modalMercadoPago.error && (
+              <div className="p-4 rounded-2xl bg-red-950/40 border border-red-900/60 space-y-2 mb-4 relative z-10">
+                <div className="flex items-center gap-2 text-red-400 text-xs font-bold">
+                  <AlertCircle className="w-4 h-4" />
+                  <span>Aviso de Mercado Pago</span>
+                </div>
+                <p className="text-xs text-neutral-300">{modalMercadoPago.error}</p>
+                <div className="pt-2 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handlePagarMercadoPago(modalMercadoPago.item!)}
+                    className="px-3 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-white text-xs font-heading font-bold"
+                  >
+                    Reintentar conexión
+                  </button>
+                  <button
+                    type="button"
+                    disabled={procesandoAcreditacion}
+                    onClick={() => handleConfirmarPagoOnline(modalMercadoPago.item!, true)}
+                    className="px-3 py-2 rounded-xl bg-cyan-950 hover:bg-cyan-900 text-cyan-300 border border-cyan-800 text-xs font-heading font-bold flex items-center justify-center gap-1.5"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Simular pago aprobado (Modo Demo)</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Botón Principal cuando la URL está lista */}
+            {modalMercadoPago.urlPago && (
+              <div className="space-y-4 relative z-10">
+                <a
+                  href={modalMercadoPago.urlPago}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-4 px-6 rounded-2xl bg-[#009ee3] hover:bg-[#0082ba] active:scale-98 text-white font-heading font-black text-sm sm:text-base uppercase tracking-wider flex items-center justify-center gap-3 shadow-xl shadow-[#009ee3]/30 transition-all border border-cyan-300/30 cursor-pointer text-center group"
+                >
+                  <CreditCard className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                  <span>ABRIR MERCADO PAGO Y PAGAR ↗</span>
+                </a>
+
+                <p className="text-[11px] text-center text-neutral-400 leading-relaxed">
+                  Podés abonar con dinero en cuenta de Mercado Pago, Débito o Crédito. La pasarela se abre en una pestaña segura para tu comodidad.
+                </p>
+
+                <div className="pt-3 border-t border-neutral-800 space-y-2">
+                  <div className="text-[11px] text-neutral-400 text-center">
+                    ¿Ya finalizaste el pago en la ventana de Mercado Pago?
+                  </div>
+                  <button
+                    type="button"
+                    disabled={procesandoAcreditacion}
+                    onClick={() => handleConfirmarPagoOnline(modalMercadoPago.item!, false)}
+                    className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-heading font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-emerald-950 transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>{procesandoAcreditacion ? 'Asentando en Contabilidad...' : 'Confirmar Cancelación de Deuda'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={procesandoAcreditacion}
+                    onClick={() => handleConfirmarPagoOnline(modalMercadoPago.item!, true)}
+                    className="w-full py-2 px-3 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-neutral-400 hover:text-cyan-400 text-[11px] font-mono flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Probar impacto contable inmediato (Simulación Test)</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="mt-4 pt-3 border-t border-neutral-900 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setModalMercadoPago({ isOpen: false, item: null, urlPago: null, cargando: false, error: null })}
+                className="px-4 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-white text-xs font-heading font-bold uppercase transition-colors"
+              >
+                Cerrar
               </button>
             </div>
           </div>

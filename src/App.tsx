@@ -10,7 +10,7 @@ import { AdminDashboard } from './components/AdminDashboard';
 import { AuthModal } from './components/AuthModal';
 import { ToastContainer, ToastMessage } from './components/Toast';
 import { Footer } from './components/Footer';
-import { EMAIL_ADMIN_OFICIAL } from './services/gasApi';
+import { gasApi, EMAIL_ADMIN_OFICIAL } from './services/gasApi';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -29,6 +29,30 @@ export default function App() {
       }
       if (savedTurnos) {
         setTurnos(JSON.parse(savedTurnos));
+      }
+
+      // Reconciliación automática de retorno desde Mercado Pago para Cuenta Corriente
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const isMPApproved = urlParams.get('status') === 'approved' || urlParams.get('mp_status') === 'approved' || urlParams.get('collection_status') === 'approved';
+        const ccId = urlParams.get('id') || urlParams.get('cc_id');
+        const tipoPago = urlParams.get('tipo_pago');
+        const montoParam = urlParams.get('monto');
+
+        if (isMPApproved && (tipoPago === 'cuentacorriente' || ccId)) {
+          if (ccId) {
+            const montoNum = Number(montoParam) || 0;
+            gasApi.cobrarCuentaCorriente(ccId, montoNum, 'Mercado Pago (Online)', `MP-ONLINE-${ccId}`)
+              .then(() => {
+                showToast('success', '¡Deuda Cancelada en Mercado Pago!', 'El pago fue procesado con éxito e impactó de forma directa en Contabilidad.');
+              })
+              .catch((err) => console.error('Error al asentar cobro retornado:', err));
+          }
+          // Limpiar parámetros de la URL prolijamente
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+      } catch (errMP) {
+        console.error('Error al leer parámetros de Mercado Pago:', errMP);
       }
 
       // Reconciliación automática de fechas para asegurar sincronía perfecta en stock y turnos

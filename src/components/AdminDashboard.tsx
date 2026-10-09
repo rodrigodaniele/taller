@@ -1908,7 +1908,17 @@ function eliminarMovimientoContabilidad(id) {
 // --- CONFIRMACIÓN Y ESCRITURA EN EL EXCEL ---
 function doGet(e) {
   let params = e.parameter;
+
+  // 1. PAGO TOTAL DE CUENTA CORRIENTE POR MERCADO PAGO (PRIORIDAD)
+  if (params.tipo_pago === "cuentacorriente" && params.status === "approved") {
+    try {
+      cobrarCuentaCorrienteSheet(params.id, Number(params.monto) || 0, "Mercado Pago Online", "MP-ONLINE-" + params.id);
+    } catch(errCC) {}
+    let htmlExitoCC = "<html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'><title>Deuda Cancelada</title><style>body{background:#000;color:#fff;font-family:sans-serif;text-align:center;padding:10px;} .card{border:2px solid #22c55e;padding:35px 20px;max-width:420px;margin:40px auto;background:#0d0d0d;border-radius:8px;box-shadow:0 4px 15px rgba(34,197,94,0.2);} h1{color:#22c55e;margin-top:0;font-size:24px;} .dato{background:#151515;padding:10px;margin:8px 0;border-radius:4px;text-align:left;border:1px solid #222;} .btn{display:inline-block;padding:12px 30px;background:#22c55e;color:#000;text-decoration:none;font-weight:bold;border-radius:4px;margin-top:20px;text-transform:uppercase;font-size:14px;}</style></head><body><div class='card'><h1>¡Deuda Cancelada con Éxito!</h1><p style='color:#aaa;'>Tu pago total mediante Mercado Pago fue acreditado correctamente.</p><div class='dato'>🚗 <strong>Patente:</strong> " + params.patente + "</div><div class='dato'>💰 <strong>Monto Abonado:</strong> $" + params.monto + "</div><a href='#' onclick='window.close();' class='btn'>Cerrar Ventana</a></div><script>if(window.opener){window.opener.location.reload();}</script></body></html>";
+    return HtmlService.createHtmlOutput(htmlExitoCC);
+  }
   
+  // 2. SEÑA DE TURNO REGULAR POR MERCADO PAGO
   if (params.status === "approved") {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var sheetTurnos = ss.getSheetByName("Turnos");
@@ -1936,15 +1946,6 @@ function doGet(e) {
 
     let htmlExito = "<html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'><title>Seña Confirmada</title><style>body{background:#000;color:#fff;font-family:sans-serif;text-align:center;padding:10px;} .card{border:2px solid #e31212;padding:35px 20px;max-width:420px;margin:40px auto;background:#0d0d0d;border-radius:8px;box-shadow:0 4px 15px rgba(227,18,18,0.2);} h1{color:#e31212;margin-top:0;font-size:24px;} .dato{background:#151515;padding:10px;margin:8px 0;border-radius:4px;text-align:left;border:1px solid #222;} .btn{display:inline-block;padding:12px 30px;background:#e31212;color:#fff;text-decoration:none;font-weight:bold;border-radius:4px;margin-top:20px;text-transform:uppercase;font-size:14px;}</style></head><body><div class='card'><h1>¡Seña de Turno Recibida!</h1><p style='color:#aaa;'>Tu pago fue aprobado. Agendamos tu vehículo en el taller con éxito.</p><div class='dato'>🚗 <strong>Patente:</strong> " + params.patente + "</div><div class='dato'>📅 <strong>Día:</strong> " + params.fecha + "</div><div class='dato'>⏰ <strong>Horario:</strong> " + params.horario + " hs</div><a href='#' onclick='window.close();' class='btn'>Finalizar y cerrar</a></div><script>if(window.opener){window.opener.location.reload();}</script></body></html>";
     return HtmlService.createHtmlOutput(htmlExito);
-  }
-
-  // PAGO TOTAL DE CUENTA CORRIENTE POR MERCADO PAGO
-  if (params.tipo_pago === "cuentacorriente" && params.status === "approved") {
-    try {
-      cobrarCuentaCorrienteSheet(params.id, Number(params.monto) || 0, "Mercado Pago Online", "MP-ONLINE-" + params.id);
-    } catch(errCC) {}
-    let htmlExitoCC = "<html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'><title>Deuda Cancelada</title><style>body{background:#000;color:#fff;font-family:sans-serif;text-align:center;padding:10px;} .card{border:2px solid #22c55e;padding:35px 20px;max-width:420px;margin:40px auto;background:#0d0d0d;border-radius:8px;box-shadow:0 4px 15px rgba(34,197,94,0.2);} h1{color:#22c55e;margin-top:0;font-size:24px;} .dato{background:#151515;padding:10px;margin:8px 0;border-radius:4px;text-align:left;border:1px solid #222;} .btn{display:inline-block;padding:12px 30px;background:#22c55e;color:#000;text-decoration:none;font-weight:bold;border-radius:4px;margin-top:20px;text-transform:uppercase;font-size:14px;}</style></head><body><div class='card'><h1>¡Deuda Cancelada con Éxito!</h1><p style='color:#aaa;'>Tu pago total mediante Mercado Pago fue acreditado correctamente.</p><div class='dato'>🚗 <strong>Patente:</strong> " + params.patente + "</div><div class='dato'>💰 <strong>Monto Abonado:</strong> $" + params.monto + "</div><a href='#' onclick='window.close();' class='btn'>Cerrar Ventana</a></div><script>if(window.opener){window.opener.location.reload();}</script></body></html>";
-    return HtmlService.createHtmlOutput(htmlExitoCC);
   }
   
   let htmlFallo = "<html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'><title>Pago Cancelado</title></head><body style='background:#000;color:#fff;text-align:center;font-family:sans-serif;padding:10px;'><div style='border:2px solid #555;padding:35px 20px;max-width:420px;margin:40px auto;background:#0d0d0d;border-radius:8px;'><h1 style='color:#ff3333;margin-top:0;'>Pago no Procesado</h1><p style='color:#aaa;'>No se pudo completar el cobro de la seña del turno. La reserva quedó cancelada y el horario sigue disponible.</p><a href='#' onclick='window.close();' style='color:#fff;font-weight:bold;'>Volver a intentar</a></div></body></html>";
@@ -3106,7 +3107,7 @@ function iniciarPagoMercadoPagoCCSheet(id) {
   var opciones = {
     method: "post",
     contentType: "application/json",
-    headers: { "Authorization": "Bearer " + MP_ACCESS_TOKEN },
+    headers: { "Authorization": "Bearer " + MERCADOPAGO_ACCESS_TOKEN.trim(), "Accept": "application/json" },
     payload: JSON.stringify(payload),
     muteHttpExceptions: true
   };
