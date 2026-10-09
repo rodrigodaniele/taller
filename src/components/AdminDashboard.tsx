@@ -404,20 +404,45 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
       const res = await gasApi.getAccountingMovements();
       if (res.success && Array.isArray(res.movimientos)) {
         const norm = res.movimientos.map((m: any) => ({ ...m, fecha: normalizarFechaArgentina(m.fecha) }));
-        // Deduplicación preventiva por ID para asegurar registros únicos en la vista
-        const seenIds = new Set<string>();
+        // Deduplicación inteligente para limpiar duplicados existentes de compras de stock
+        const seenKeys = new Set<string>();
         const deduped: MovimientoContable[] = [];
+        const duplicatesToDeleteFromRemote: string[] = [];
+
         for (const m of norm) {
-          const key = m.id ? String(m.id).trim() : `${m.fecha}-${m.tipo}-${m.concepto}-${m.monto}`;
-          if (!seenIds.has(key)) {
-            seenIds.add(key);
+          const conceptoNorm = String(m.concepto || '')
+            .toLowerCase()
+            .replace(/\s+/g, ' ')
+            .trim();
+          
+          let dedupeKey = m.id ? String(m.id).trim() : `${m.fecha}-${m.tipo}-${m.concepto}-${m.monto}`;
+          
+          if (m.tipo === 'gasto' && m.categoria === 'Repuestos / Repuesteros') {
+            dedupeKey = `gasto-repuesto-${m.fecha}-${m.monto}-${conceptoNorm}`;
+          }
+
+          if (!seenKeys.has(dedupeKey)) {
+            seenKeys.add(dedupeKey);
             deduped.push(m);
+          } else {
+            // Se detectó un clon duplicado en la misma fecha y monto
+            if (m.id && (String(m.id).startsWith('MOV-COMPRA-') || String(m.id).startsWith('MOV-STOCK-'))) {
+              duplicatesToDeleteFromRemote.push(String(m.id));
+            }
           }
         }
+
         setMovimientos(deduped);
         try {
           localStorage.setItem('lacasadeladireccion_contabilidad', JSON.stringify(deduped));
         } catch {}
+
+        // Limpiar automáticamente de Google Sheets el clon duplicado
+        if (duplicatesToDeleteFromRemote.length > 0) {
+          duplicatesToDeleteFromRemote.forEach((dupId) => {
+            gasApi.deleteAccountingMovement(dupId).catch(() => {});
+          });
+        }
       } else {
         setMovimientos([]);
       }
@@ -1783,11 +1808,21 @@ function registrarMovimientoContabilidad(m) {
   
   var id = m.id || ("MOV-" + new Date().getTime());
 
-  // Protección anti-duplicados por ID: si el movimiento ya existe en la hoja, no duplicar la fila
+  // Protección anti-duplicados por ID y por contenido idéntico
+  var mConceptoNorm = String(m.concepto || "").toLowerCase().replace(/\s+/g, " ").trim();
+  var mMontoNum = Number(m.monto) || 0;
   var data = sheet.getDataRange().getValues();
   for (var i = 1; i < data.length; i++) {
-    if (String(data[i][0]).trim() === String(id).trim()) {
+    var rowId = String(data[i][0]).trim();
+    if (rowId === String(id).trim()) {
       return { success: true, id: id, duplicado: true };
+    }
+    if (m.tipo === "gasto" && String(data[i][2]).toLowerCase() === "gasto") {
+      var rowConceptoNorm = String(data[i][3] || "").toLowerCase().replace(/\s+/g, " ").trim();
+      var rowMonto = Number(data[i][5]) || 0;
+      if (Math.abs(rowMonto - mMontoNum) < 0.01 && (rowConceptoNorm === mConceptoNorm || (mConceptoNorm.indexOf("compra repuestos") !== -1 && rowConceptoNorm.indexOf("compra repuestos") !== -1))) {
+        return { success: true, id: rowId, duplicado: true };
+      }
     }
   }
 
@@ -2660,8 +2695,8 @@ function registrarCompraRepuestoSheet(compra) {
     ]);
   }
 
-  // 3. Impactar en Contabilidad (única vez, solo si no fue enviado previamente por el flujo unificado)
-  if (impactaCont && costoTotal > 0 && !compra.yaImpactoContabilidad) {
+  // 3. Impactar en Contabilidad (registro único y centralizado)
+  if (impactaCont && costoTotal > 0) {
     registrarMovimientoContabilidad({
       id: "MOV-" + id,
       fecha: fechaFmt,

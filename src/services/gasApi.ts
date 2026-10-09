@@ -260,6 +260,24 @@ export const gasApi = {
       const res = await callGasApi({
         accion: 'obtenerMovimientosContables',
       });
+      if (res && res.success && Array.isArray(res.movimientos)) {
+        // Deduplicación preventiva de movimientos gemelos por compras de stock
+        const seenStockKeys = new Set<string>();
+        const deduped: any[] = [];
+        for (const m of res.movimientos) {
+          const normFecha = normalizarFechaArgentina(m.fecha);
+          const conceptoNorm = String(m.concepto || '').toLowerCase().replace(/\s+/g, ' ').trim();
+          let key = m.id ? String(m.id).trim() : `${normFecha}-${m.tipo}-${m.concepto}-${m.monto}`;
+          if (m.tipo === 'gasto' && m.categoria === 'Repuestos / Repuesteros') {
+            key = `gasto-repuesto-${normFecha}-${m.monto}-${conceptoNorm}`;
+          }
+          if (!seenStockKeys.has(key)) {
+            seenStockKeys.add(key);
+            deduped.push({ ...m, fecha: normFecha });
+          }
+        }
+        return { success: true, movimientos: deduped };
+      }
       return res;
     } catch (e: any) {
       console.warn('Google Apps Script no soporta obtenerMovimientosContables aún, leyendo desde almacenamiento local:', e);
@@ -981,7 +999,7 @@ export const gasApi = {
       }
       localStorage.setItem('taller_stock_v1', JSON.stringify(listStock));
 
-      // 3. IMPACTAR EN CONTABILIDAD COMO GASTO NEGATIVO (REGISTRO ÚNICO Y CENTRALIZADO)
+      // 3. Registrar gasto en contabilidad local para visualización instantánea (SIN enviar RPC duplicado)
       if (compra.impactaContabilidad && compra.costoTotal > 0) {
         const provTxt = compra.proveedor ? ` (${compra.proveedor})` : '';
         const movGasto = {
@@ -992,33 +1010,39 @@ export const gasApi = {
           categoria: 'Repuestos / Repuesteros',
           monto: Number(compra.costoTotal),
           metodoPago: compra.metodoPago || 'Efectivo',
-          referencia: compra.comprobante ? `COMPROBANTE ${compra.comprobante}` : 'COMPRA STOCK TALLER',
+          referencia: compra.comprobante ? `COMPROBANTE ${compra.comprobante}` : 'STOCK TALLER',
         };
-        await gasApi.addAccountingMovement(movGasto);
+        try {
+          const savedContab = localStorage.getItem('lacasadeladireccion_contabilidad');
+          const listContab = savedContab ? JSON.parse(savedContab) : [];
+          if (!listContab.some((m: any) => m.id === movGasto.id)) {
+            listContab.unshift(movGasto);
+            localStorage.setItem('lacasadeladireccion_contabilidad', JSON.stringify(listContab));
+          }
+        } catch (e) {}
       }
 
       // 4. Notificar a toda la interfaz
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('taller_stock_sync'));
+        window.dispatchEvent(new CustomEvent('taller_contabilidad_sync'));
         if (typeof BroadcastChannel !== 'undefined') {
           try {
             const bc = new BroadcastChannel('lacasadeladireccion_realtime');
             bc.postMessage({ type: 'STOCK_UPDATED' });
+            bc.postMessage({ type: 'CONTABILIDAD_UPDATED' });
             bc.close();
           } catch {}
         }
       }
 
-      // 5. Guardar en Google Sheets (hoja Compras_Repuestos y actualizar hoja Stock)
-      // Guardamos impactaContabilidad: true para que figure 'SI' en la columna de la hoja Compras_Repuestos,
-      // y avisamos yaImpactoContabilidad: true para que Apps Script no duplique el movimiento contable.
+      // 5. Guardar en Google Sheets (hoja Compras_Repuestos, actualiza Stock e impacta en Contabilidad exactamente 1 sola vez)
       try {
         await callGasApi({
           accion: 'registrarCompraRepuesto',
           compra: {
             ...nuevaCompra,
             impactaContabilidad: Boolean(compra.impactaContabilidad),
-            yaImpactoContabilidad: true,
           },
         });
       } catch (sheetErr) {
