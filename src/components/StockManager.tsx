@@ -33,6 +33,7 @@ interface StockManagerProps {
   stockList: ItemStock[];
   onStockUpdated: (items: ItemStock[]) => void;
   onRegistrarGastoContabilidad?: (concepto: string, monto: number, metodoPago: string) => void;
+  onContabilidadUpdated?: () => void;
   onShowToast: (type: 'success' | 'error' | 'warning' | 'info', title: string, desc?: string) => void;
 }
 
@@ -40,6 +41,7 @@ export const StockManager = ({
   stockList,
   onStockUpdated,
   onRegistrarGastoContabilidad,
+  onContabilidadUpdated,
   onShowToast,
 }: StockManagerProps) => {
   // Pestaña activa dentro del módulo de Stock: Módulo 1 (Rotación/Usados) o Módulo 2 (Compras/Inventario)
@@ -366,7 +368,7 @@ export const StockManager = ({
   const handleEliminarCompra = async (id: string, repuestoNombre: string, cantidad: number) => {
     if (
       !confirm(
-        `¿Eliminar este registro de compra de "${repuestoNombre}" (${cantidad} unid.) del historial?\n\n(No modificará el stock actual ya existente)`
+        `¿Eliminar este registro de compra de "${repuestoNombre}" (${cantidad} unid.) del historial?\n\n(Se descontará automáticamente cualquier gasto vinculado en Contabilidad)`
       )
     ) {
       return;
@@ -375,7 +377,8 @@ export const StockManager = ({
     try {
       await gasApi.eliminarCompraRepuesto(id);
       await cargarListas();
-      onShowToast('info', 'Compra eliminada', `Se eliminó el registro de compra de ${repuestoNombre}.`);
+      onContabilidadUpdated?.();
+      onShowToast('info', 'Compra eliminada', `Se eliminó el registro de compra y se descontó de contabilidad.`);
     } catch (err: any) {
       onShowToast('error', 'Error al eliminar', err.message);
     }
@@ -1372,7 +1375,7 @@ export const StockManager = ({
                             </span>
                           </td>
                           <td className="py-3 px-4 text-center font-sans">
-                            {compra.impactaContabilidad ? (
+                            {compra.impactaContabilidad || (compra.costoTotal && compra.costoTotal > 0) ? (
                               <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800">
                                 SÍ (-${compra.costoTotal?.toLocaleString('es-AR')})
                               </span>

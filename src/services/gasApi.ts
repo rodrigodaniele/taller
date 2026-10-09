@@ -298,6 +298,17 @@ export const gasApi = {
         const list = JSON.parse(saved).filter((m: any) => m.id !== id);
         localStorage.setItem('lacasadeladireccion_contabilidad', JSON.stringify(list));
       }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('taller_contabilidad_sync'));
+        if (typeof BroadcastChannel !== 'undefined') {
+          try {
+            const bc = new BroadcastChannel('lacasadeladireccion_realtime');
+            bc.postMessage({ type: 'CONTABILIDAD_UPDATED' });
+            bc.close();
+          } catch {}
+        }
+      }
     } catch (e) {
       console.error(e);
     }
@@ -424,11 +435,72 @@ export const gasApi = {
   },
 
   async deletePresupuesto(id: string): Promise<{ success: boolean; error?: string }> {
+    let pTarget: Presupuesto | undefined;
     try {
       const saved = localStorage.getItem('taller_presupuestos_v1');
       if (saved) {
-        const list: Presupuesto[] = JSON.parse(saved).filter((p: Presupuesto) => p.id !== id);
-        localStorage.setItem('taller_presupuestos_v1', JSON.stringify(list));
+        const list: Presupuesto[] = JSON.parse(saved);
+        pTarget = list.find((p: Presupuesto) => p.id === id);
+        const updated = list.filter((p: Presupuesto) => p.id !== id);
+        localStorage.setItem('taller_presupuestos_v1', JSON.stringify(updated));
+      }
+
+      // Revertir y eliminar automáticamente el impacto contable si fue facturado
+      const savedContab = localStorage.getItem('lacasadeladireccion_contabilidad');
+      if (savedContab) {
+        const contabList = JSON.parse(savedContab);
+        const movIdDirecto = `MOV-PRESUP-${id}`;
+        const contabUpdated = contabList.filter((m: any) => {
+          if (!m) return false;
+          const mid = String(m.id || '');
+          if (mid === movIdDirecto || mid === id) return false;
+          if (pTarget) {
+            const num = (pTarget.numero || '').trim();
+            const pat = (pTarget.patente || '').trim().toUpperCase();
+            if (num && typeof m.concepto === 'string' && m.concepto.includes(num)) return false;
+            if (num && typeof m.referencia === 'string' && m.referencia.includes(num)) return false;
+            if (
+              pat &&
+              typeof m.referencia === 'string' &&
+              m.referencia.toUpperCase().includes(pat) &&
+              m.tipo === 'ingreso' &&
+              Math.abs(Number(m.monto) - Number(pTarget.total)) < 0.01
+            ) {
+              return false;
+            }
+          }
+          return true;
+        });
+        localStorage.setItem('lacasadeladireccion_contabilidad', JSON.stringify(contabUpdated));
+      }
+
+      // Eliminar también repuestos usados vinculados a este presupuesto (Módulo 1)
+      if (pTarget) {
+        const savedUsados = localStorage.getItem('taller_repuestos_usados_v1');
+        if (savedUsados) {
+          const listUsados: RepuestoUsado[] = JSON.parse(savedUsados);
+          const num = (pTarget.numero || '').trim();
+          const listUsadosFiltrada = listUsados.filter((u) => {
+            if (u.presupuestoId && (u.presupuestoId === id || (num && u.presupuestoId === num))) return false;
+            return true;
+          });
+          localStorage.setItem('taller_repuestos_usados_v1', JSON.stringify(listUsadosFiltrada));
+        }
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('taller_presupuesto_sync'));
+        window.dispatchEvent(new CustomEvent('taller_contabilidad_sync'));
+        window.dispatchEvent(new CustomEvent('taller_stock_sync'));
+        if (typeof BroadcastChannel !== 'undefined') {
+          try {
+            const bc = new BroadcastChannel('lacasadeladireccion_realtime');
+            bc.postMessage({ type: 'PRESUPUESTO_DELETED', id });
+            bc.postMessage({ type: 'CONTABILIDAD_UPDATED' });
+            bc.postMessage({ type: 'STOCK_UPDATED' });
+            bc.close();
+          } catch {}
+        }
       }
     } catch (e) {
       console.error(e);
@@ -438,6 +510,8 @@ export const gasApi = {
       return await callGasApi({
         accion: 'borrarPresupuesto',
         id,
+        numero: pTarget?.numero,
+        patente: pTarget?.patente,
       });
     } catch (err: any) {
       return { success: true };
@@ -510,6 +584,17 @@ export const gasApi = {
       if (saved) {
         const list: ItemStock[] = JSON.parse(saved).filter((x: ItemStock) => x.id !== id);
         localStorage.setItem('taller_stock_v1', JSON.stringify(list));
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('taller_stock_sync'));
+        if (typeof BroadcastChannel !== 'undefined') {
+          try {
+            const bc = new BroadcastChannel('lacasadeladireccion_realtime');
+            bc.postMessage({ type: 'STOCK_UPDATED' });
+            bc.close();
+          } catch {}
+        }
       }
     } catch (e) {}
 
@@ -813,8 +898,15 @@ export const gasApi = {
     try {
       const res = await callGasApi({ accion: 'obtenerComprasRepuestos' });
       if (res && res.resultado === 'ok' && Array.isArray(res.items)) {
-        localStorage.setItem('taller_compras_repuestos_v1', JSON.stringify(res.items));
-        return { success: true, items: res.items };
+        const items = res.items.map((it: any) => ({
+          ...it,
+          impactaContabilidad:
+            it.impactaContabilidad === true ||
+            String(it.impactaContabilidad).toUpperCase() === 'SI' ||
+            (Number(it.costoTotal) > 0 && it.impactaContabilidad !== false),
+        }));
+        localStorage.setItem('taller_compras_repuestos_v1', JSON.stringify(items));
+        return { success: true, items };
       }
     } catch (e) {
       console.warn('Conexión con Google Sheets para compras no disponible, leyendo caché local:', e);
@@ -823,7 +915,14 @@ export const gasApi = {
     try {
       const saved = localStorage.getItem('taller_compras_repuestos_v1');
       const list: CompraRepuesto[] = saved ? JSON.parse(saved) : [];
-      return { success: true, items: list };
+      const items = list.map((it: any) => ({
+        ...it,
+        impactaContabilidad:
+          it.impactaContabilidad === true ||
+          String(it.impactaContabilidad).toUpperCase() === 'SI' ||
+          (Number(it.costoTotal) > 0 && it.impactaContabilidad !== false),
+      }));
+      return { success: true, items };
     } catch (e) {
       console.warn('Error al obtener compras de repuestos:', e);
       return { success: true, items: [] };
@@ -911,13 +1010,16 @@ export const gasApi = {
       }
 
       // 5. Guardar en Google Sheets (hoja Compras_Repuestos y actualizar hoja Stock)
-      // NOTA: Pasamos impactaContabilidad: false en la llamada de registrarCompraRepuesto porque
-      // el movimiento contable ya fue enviado a Google Sheets de manera unificada mediante
-      // addAccountingMovement (acción 'registrarMovimientoContable'). Esto evita duplicar o triplicar el gasto.
+      // Guardamos impactaContabilidad: true para que figure 'SI' en la columna de la hoja Compras_Repuestos,
+      // y avisamos yaImpactoContabilidad: true para que Apps Script no duplique el movimiento contable.
       try {
         await callGasApi({
           accion: 'registrarCompraRepuesto',
-          compra: { ...nuevaCompra, impactaContabilidad: false, yaImpactoContabilidad: true },
+          compra: {
+            ...nuevaCompra,
+            impactaContabilidad: Boolean(compra.impactaContabilidad),
+            yaImpactoContabilidad: true,
+          },
         });
       } catch (sheetErr) {
         console.warn('Guardado en caché local, se sincronizará al conectar con Google Sheets:', sheetErr);
@@ -931,17 +1033,59 @@ export const gasApi = {
   },
 
   /**
-   * MÓDULO 2: Eliminar registro de compra de repuestos
+   * MÓDULO 2: Eliminar registro de compra de repuestos y revertir su impacto contable
    */
   async eliminarCompraRepuesto(id: string): Promise<{ success: boolean; error?: string }> {
     try {
       const saved = localStorage.getItem('taller_compras_repuestos_v1');
       const list: CompraRepuesto[] = saved ? JSON.parse(saved) : [];
+      const compraAEliminar = list.find((x) => x.id === id);
       const updated = list.filter((x) => x.id !== id);
       localStorage.setItem('taller_compras_repuestos_v1', JSON.stringify(updated));
 
+      // Revertir y eliminar automáticamente el gasto generado en contabilidad
+      const savedContab = localStorage.getItem('lacasadeladireccion_contabilidad');
+      if (savedContab) {
+        const contabList = JSON.parse(savedContab);
+        const movIdDirecto = `MOV-${id}`;
+        const movIdStock = `MOV-STOCK-${id}`;
+        const movIdLower = `mov-${id}`;
+        const contabUpdated = contabList.filter((m: any) => {
+          if (!m) return false;
+          const mid = String(m.id || '');
+          if (mid === movIdDirecto || mid === movIdStock || mid === movIdLower || mid === id) return false;
+          // Validar si la referencia o el concepto refieren exactamente a este ID de compra
+          if (typeof m.referencia === 'string' && m.referencia.includes(id)) return false;
+          // Validar si la compra coincide por datos exactos
+          if (compraAEliminar && compraAEliminar.costoTotal > 0) {
+            if (compraAEliminar.comprobante && typeof m.referencia === 'string' && m.referencia.includes(compraAEliminar.comprobante)) {
+              return false;
+            }
+            if (
+              m.tipo === 'gasto' &&
+              Math.abs(Number(m.monto) - Number(compraAEliminar.costoTotal)) < 0.01 &&
+              typeof m.concepto === 'string' &&
+              m.concepto.includes(compraAEliminar.repuestoNombre)
+            ) {
+              return false;
+            }
+          }
+          return true;
+        });
+        localStorage.setItem('lacasadeladireccion_contabilidad', JSON.stringify(contabUpdated));
+      }
+
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('taller_stock_sync'));
+        window.dispatchEvent(new CustomEvent('taller_contabilidad_sync'));
+        if (typeof BroadcastChannel !== 'undefined') {
+          try {
+            const bc = new BroadcastChannel('lacasadeladireccion_realtime');
+            bc.postMessage({ type: 'CONTABILIDAD_UPDATED' });
+            bc.postMessage({ type: 'STOCK_UPDATED' });
+            bc.close();
+          } catch {}
+        }
       }
     } catch (e) {
       console.error(e);

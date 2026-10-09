@@ -498,6 +498,7 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
     };
     window.addEventListener('taller_presupuesto_sync', handleCustomSync);
     window.addEventListener('taller_stock_sync', handleCustomSync);
+    window.addEventListener('taller_contabilidad_sync', handleCustomSync);
 
     const handleFocus = () => {
       fetchTurnos(true);
@@ -530,6 +531,7 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
       window.removeEventListener('storage', handleStorage);
       window.removeEventListener('taller_presupuesto_sync', handleCustomSync);
       window.removeEventListener('taller_stock_sync', handleCustomSync);
+      window.removeEventListener('taller_contabilidad_sync', handleCustomSync);
       window.removeEventListener('focus', handleFocus);
       document.removeEventListener('visibilitychange', handleVisibility);
       clearInterval(interval);
@@ -1281,20 +1283,28 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
   };
 
   // Pasar presupuesto cobrado a contabilidad
-  const handleRegistrarIngresoDesdePresupuesto = async (concepto: string, monto: number, referencia: string, fecha?: string) => {
+  const handleRegistrarIngresoDesdePresupuesto = async (
+    concepto: string,
+    monto: number,
+    referencia: string,
+    fecha?: string,
+    presupuestoId?: string,
+    presupuestoNumero?: string
+  ) => {
     try {
       const fechaMovimiento = fecha ? normalizarFechaArgentina(fecha) : getFechaHoyArgentina();
+      const movId = presupuestoId ? `MOV-PRESUP-${presupuestoId}` : `mov-${Date.now()}`;
       await gasApi.addAccountingMovement({
-        id: `mov-${Date.now()}`,
+        id: movId,
         fecha: fechaMovimiento,
         tipo: 'ingreso',
         concepto,
         categoria: 'Mano de Obra / Taller',
         monto,
         metodoPago: 'Efectivo',
-        referencia,
+        referencia: presupuestoNumero ? `${referencia} (Presup. ${presupuestoNumero})` : referencia,
       });
-      fetchContabilidad();
+      fetchContabilidad(true);
     } catch (e) {
       console.warn('Error al asentar presupuesto en caja:', e);
     }
@@ -1669,7 +1679,7 @@ function doPost(e) {
 
     // --- ACCIÓN 14: BORRAR PRESUPUESTO ---
     if (datos.accion === "borrarPresupuesto") {
-      var resDelP = borrarPresupuestoSheet(datos.id);
+      var resDelP = borrarPresupuestoSheet(datos.id, datos.numero, datos.patente);
       return ContentService.createTextOutput(JSON.stringify(resDelP)).setMimeType(ContentService.MimeType.JSON);
     }
 
@@ -2097,17 +2107,52 @@ function actualizarEstadoPresupuestoSheet(id, estado) {
   return { resultado: "ok" };
 }
 
-function borrarPresupuestoSheet(id) {
+function borrarPresupuestoSheet(id, numero, patente) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("Presupuestos");
-  if (!sheet) return { resultado: "ok" };
-  var datos = sheet.getDataRange().getValues();
-  for (var i = 1; i < datos.length; i++) {
-    if (datos[i][0] && datos[i][0].toString() === id.toString()) {
-      sheet.deleteRow(i + 1);
-      break;
+  var pNumero = numero ? String(numero) : "";
+  var pPatente = patente ? String(patente) : "";
+  if (sheet) {
+    var datos = sheet.getDataRange().getValues();
+    for (var i = 1; i < datos.length; i++) {
+      if (datos[i][0] && datos[i][0].toString() === id.toString()) {
+        if (!pNumero && datos[i][1]) pNumero = String(datos[i][1]);
+        if (!pPatente && datos[i][5]) pPatente = String(datos[i][5]);
+        sheet.deleteRow(i + 1);
+        break;
+      }
     }
   }
+
+  // Cascada contable: eliminar automáticamente el ingreso generado en la hoja Contabilidad
+  var sheetContab = ss.getSheetByName("Contabilidad");
+  if (sheetContab) {
+    var contabData = sheetContab.getDataRange().getValues();
+    var movIdDirecto = "MOV-PRESUP-" + id;
+    for (var j = contabData.length - 1; j >= 1; j--) {
+      var rowId = String(contabData[j][0] || "");
+      var rowConcepto = String(contabData[j][3] || "");
+      var rowRef = String(contabData[j][6] || "");
+      var matchId = rowId === movIdDirecto || rowId === String(id);
+      var matchNum = pNumero && (rowConcepto.indexOf(pNumero) !== -1 || rowRef.indexOf(pNumero) !== -1);
+      if (matchId || matchNum) {
+        sheetContab.deleteRow(j + 1);
+      }
+    }
+  }
+
+  // Cascada repuestos usados: eliminar de Repuestos_Utilizados
+  var sheetUsados = ss.getSheetByName("Repuestos_Utilizados");
+  if (sheetUsados && (pNumero || id)) {
+    var usadosData = sheetUsados.getDataRange().getValues();
+    for (var k = usadosData.length - 1; k >= 1; k--) {
+      var presupCol = String(usadosData[k][7] || "");
+      if (presupCol === pNumero || presupCol === String(id)) {
+        sheetUsados.deleteRow(k + 1);
+      }
+    }
+  }
+
   return { resultado: "ok" };
 }
 
@@ -2525,7 +2570,7 @@ function obtenerComprasRepuestosSheet() {
         costoTotal: Number(r[7]) || 0,
         proveedor: String(r[8] || ""),
         metodoPago: String(r[9] || "Efectivo"),
-        impactaContabilidad: String(r[10]).toUpperCase() === "SI" || r[10] === true,
+        impactaContabilidad: String(r[10]).toUpperCase() === "SI" || r[10] === true || Number(r[7]) > 0,
         comprobante: String(r[11] || "")
       });
     }
@@ -2635,14 +2680,40 @@ function registrarCompraRepuestoSheet(compra) {
 function eliminarCompraRepuestoSheet(id) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("Compras_Repuestos");
-  if (!sheet) return { resultado: "ok", success: true };
-  var data = sheet.getDataRange().getValues();
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][0]) === String(id)) {
-      sheet.deleteRow(i + 1);
-      break;
+  var repuestoNombre = "";
+  var costoTotal = 0;
+  if (sheet) {
+    var data = sheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]) === String(id)) {
+        repuestoNombre = String(data[i][2] || "");
+        costoTotal = Number(data[i][6] || 0);
+        sheet.deleteRow(i + 1);
+        break;
+      }
     }
   }
+
+  // Cascada contable: eliminar automáticamente el gasto generado en la hoja Contabilidad
+  var sheetContab = ss.getSheetByName("Contabilidad");
+  if (sheetContab) {
+    var contabData = sheetContab.getDataRange().getValues();
+    var movIdDirecto = "MOV-" + id;
+    var movIdStock = "MOV-STOCK-" + id;
+    var movIdLower = "mov-" + id;
+    for (var j = contabData.length - 1; j >= 1; j--) {
+      var rowId = String(contabData[j][0] || "");
+      var rowConcepto = String(contabData[j][3] || "");
+      var rowMonto = Number(contabData[j][4] || 0);
+      var rowRef = String(contabData[j][6] || "");
+      var matchId = rowId === movIdDirecto || rowId === movIdStock || rowId === movIdLower || rowId === String(id) || (id && rowRef.indexOf(String(id)) !== -1);
+      var matchNombre = repuestoNombre && costoTotal > 0 && rowConcepto.indexOf(repuestoNombre) !== -1 && Math.abs(rowMonto - costoTotal) < 0.01;
+      if (matchId || matchNombre) {
+        sheetContab.deleteRow(j + 1);
+      }
+    }
+  }
+
   return { resultado: "ok", success: true };
 }
 
@@ -3094,6 +3165,7 @@ function obtenerHistorialCliente(emailCliente) {
             presupuestosList={presupuestos}
             onPresupuestosUpdated={setPresupuestos}
             onRegistrarIngresoCaja={handleRegistrarIngresoDesdePresupuesto}
+            onContabilidadUpdated={fetchContabilidad}
             onTurnoAtendido={handleTurnoAtendido}
             onShowToast={onShowToast}
             initialTurnoParaPresupuestar={turnoParaPresupuesto}
@@ -3107,6 +3179,7 @@ function obtenerHistorialCliente(emailCliente) {
             stockList={stockList}
             onStockUpdated={(items) => setStockList(items)}
             onRegistrarGastoContabilidad={handleRegistrarGastoDesdeStock}
+            onContabilidadUpdated={fetchContabilidad}
             onShowToast={onShowToast}
           />
         )}

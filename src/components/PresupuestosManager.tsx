@@ -31,7 +31,15 @@ interface PresupuestosManagerProps {
   turnosPendientes: TurnoAdmin[];
   presupuestosList?: Presupuesto[];
   onPresupuestosUpdated?: (updated: Presupuesto[]) => void;
-  onRegistrarIngresoCaja: (concepto: string, monto: number, referencia: string, fecha?: string) => void;
+  onRegistrarIngresoCaja: (
+    concepto: string,
+    monto: number,
+    referencia: string,
+    fecha?: string,
+    presupuestoId?: string,
+    presupuestoNumero?: string
+  ) => void;
+  onContabilidadUpdated?: () => void;
   onTurnoAtendido?: (patente: string) => void;
   onShowToast: (type: 'success' | 'error' | 'warning' | 'info', title: string, desc?: string) => void;
   initialTurnoParaPresupuestar?: TurnoAdmin | null;
@@ -48,6 +56,7 @@ export const PresupuestosManager = ({
   presupuestosList,
   onPresupuestosUpdated,
   onRegistrarIngresoCaja,
+  onContabilidadUpdated,
   onTurnoAtendido,
   onShowToast,
   initialTurnoParaPresupuestar,
@@ -411,7 +420,7 @@ export const PresupuestosManager = ({
     if (nuevoEstado === 'facturado' && estadoAnterior !== 'facturado') {
       const concepto = `Facturación ${p.numero} - ${p.patente} (${p.vehiculoModelo || p.items[0]?.descripcion || 'Trabajos varios'})`;
       const fechaPresupuesto = normalizarFechaArgentina(p.fecha);
-      onRegistrarIngresoCaja(concepto, p.total, p.patente, fechaPresupuesto);
+      onRegistrarIngresoCaja(concepto, p.total, p.patente, fechaPresupuesto, p.id, p.numero);
 
       // 1. Guardar en almacenamiento local como turno atendido
       try {
@@ -505,10 +514,11 @@ export const PresupuestosManager = ({
     const p = presupuestos.find((x) => x.id === id);
     if (!confirm(`¿Estás seguro de eliminar el presupuesto ${p?.numero || ''} (${p?.patente})?`)) return;
     setPresupuestos((prev) => prev.filter((item) => item.id !== id));
-    onShowToast('info', 'Presupuesto eliminado', 'Eliminando de Google Sheets...');
+    onShowToast('info', 'Presupuesto eliminado', 'Eliminando presupuesto y descontando de contabilidad...');
 
     try {
       await gasApi.deletePresupuesto(id);
+      onContabilidadUpdated?.();
     } catch (e) {
       console.warn('Error al borrar en Sheets:', e);
     }
