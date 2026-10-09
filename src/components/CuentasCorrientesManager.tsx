@@ -395,32 +395,73 @@ export const CuentasCorrientesManager: React.FC<CuentasCorrientesManagerProps> =
     }
   };
 
-  // Confirmar que el pago ya se realizó o simular pago
+  // Verificar con la API oficial de Mercado Pago antes de asentar el cobro
   const handleConfirmarPagoOnline = async (item: CuentaCorrienteItem, esSimulacion = false) => {
     setProcesandoAcreditacion(true);
     try {
-      const metodo = esSimulacion ? 'Mercado Pago (Simulación Test)' : 'Mercado Pago (Online)';
-      const compRef = esSimulacion ? `MP-SIM-${Date.now()}` : `MP-ONLINE-${item.id}`;
-      const cobroRes = await gasApi.cobrarCuentaCorriente(
-        item.id,
-        item.saldoPendiente,
-        metodo,
-        compRef
-      );
-
-      if (cobroRes.success) {
-        onShowToast(
-          'success',
-          esSimulacion ? '¡Simulación de Pago Aprobada!' : '¡Deuda Cancelada con Éxito!',
-          `Se canceló la totalidad adeudada ($${item.saldoPendiente.toLocaleString('es-AR')}) y se impactó el ingreso en Contabilidad.`
+      if (esSimulacion) {
+        const metodo = 'Mercado Pago (Simulación Test)';
+        const compRef = `MP-SIM-${Date.now()}`;
+        const cobroRes = await gasApi.cobrarCuentaCorriente(
+          item.id,
+          item.saldoPendiente,
+          metodo,
+          compRef
         );
-        setModalMercadoPago({ isOpen: false, item: null, urlPago: null, cargando: false, error: null });
-        await cargarCuentas(true);
+        if (cobroRes.success) {
+          onShowToast(
+            'success',
+            '¡Simulación de Pago Aprobada!',
+            `Se canceló la totalidad adeudada ($${item.saldoPendiente.toLocaleString('es-AR')}) y se impactó el ingreso en Contabilidad.`
+          );
+          setModalMercadoPago({ isOpen: false, item: null, urlPago: null, cargando: false, error: null });
+          await cargarCuentas(true);
+        }
+        return;
+      }
+
+      // Verificación real con la API de Mercado Pago
+      onShowToast('info', 'Verificando con Mercado Pago...', 'Consultando estado oficial de la transacción...');
+      const resVerif = await gasApi.verificarPagoMercadoPago({ externalReference: item.id });
+
+      if (resVerif.aprobado) {
+        const metodo = 'Mercado Pago (Online)';
+        const compRef = resVerif.paymentId ? `MP-${resVerif.paymentId}` : `MP-ONLINE-${item.id}`;
+        const cobroRes = await gasApi.cobrarCuentaCorriente(
+          item.id,
+          item.saldoPendiente,
+          metodo,
+          compRef
+        );
+
+        if (cobroRes.success) {
+          onShowToast(
+            'success',
+            '¡Pago Verificado y Acreditado!',
+            `Mercado Pago confirmó la transacción aprobada (ID: ${resVerif.paymentId || 'OK'}). Se canceló la deuda de $${item.saldoPendiente.toLocaleString('es-AR')} en cuenta corriente e impactó en Contabilidad.`
+          );
+          setModalMercadoPago({ isOpen: false, item: null, urlPago: null, cargando: false, error: null });
+          await cargarCuentas(true);
+        } else {
+          onShowToast('error', 'Error al asentar', cobroRes.error || 'No se pudo asentar el cobro.');
+        }
       } else {
-        onShowToast('error', 'Error al asentar', cobroRes.error || 'No se pudo asentar el cobro.');
+        // NO APROBADO: No tocar la deuda
+        const estadoDesc =
+          resVerif.estado === 'pending'
+            ? 'Pago pendiente de acreditación'
+            : resVerif.estado === 'rejected'
+            ? 'Pago rechazado por el banco'
+            : 'No se detectó ningún pago completado';
+
+        onShowToast(
+          'warning',
+          'Pago No Acreditado',
+          `${estadoDesc}. Si cerraste la ventana de Mercado Pago sin pagar o cancelaste la operación, la deuda de $${item.saldoPendiente.toLocaleString('es-AR')} continúa pendiente.`
+        );
       }
     } catch (e: any) {
-      onShowToast('error', 'Error', e.message || 'Error al procesar.');
+      onShowToast('error', 'Error al verificar', e.message || 'Error al comunicarse con Mercado Pago.');
     } finally {
       setProcesandoAcreditacion(false);
     }
@@ -1225,32 +1266,25 @@ export const CuentasCorrientesManager: React.FC<CuentasCorrientesManagerProps> =
                 </a>
 
                 <p className="text-[11px] text-center text-neutral-400 leading-relaxed">
-                  Podés abonar con dinero en cuenta de Mercado Pago, Débito o Crédito. La pasarela se abre en una pestaña segura para tu comodidad.
+                  Podés abonar con dinero en cuenta de Mercado Pago, Débito o Crédito. La pasarela se abre en una pestaña segura de Mercado Pago.
                 </p>
 
                 <div className="pt-3 border-t border-neutral-800 space-y-2">
                   <div className="text-[11px] text-neutral-400 text-center">
-                    ¿Ya finalizaste el pago en la ventana de Mercado Pago?
+                    ¿Completaste el pago en Mercado Pago? Verificá la acreditación real:
                   </div>
                   <button
                     type="button"
                     disabled={procesandoAcreditacion}
                     onClick={() => handleConfirmarPagoOnline(modalMercadoPago.item!, false)}
-                    className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-heading font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-emerald-950 transition-all cursor-pointer disabled:opacity-50"
+                    className="w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-heading font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-emerald-950 transition-all cursor-pointer disabled:opacity-50"
                   >
                     <CheckCircle2 className="w-4 h-4" />
-                    <span>{procesandoAcreditacion ? 'Asentando en Contabilidad...' : 'Confirmar Cancelación de Deuda'}</span>
+                    <span>{procesandoAcreditacion ? 'Verificando con Mercado Pago...' : 'Verificar y Acreditar Pago'}</span>
                   </button>
-
-                  <button
-                    type="button"
-                    disabled={procesandoAcreditacion}
-                    onClick={() => handleConfirmarPagoOnline(modalMercadoPago.item!, true)}
-                    className="w-full py-2 px-3 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-neutral-400 hover:text-cyan-400 text-[11px] font-mono flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>Probar impacto contable inmediato (Simulación Test)</span>
-                  </button>
+                  <p className="text-[10px] text-center text-neutral-500">
+                    * El sistema consultará directamente a Mercado Pago. Si cerraste la ventana sin pagar, la deuda no se cancelará.
+                  </p>
                 </div>
               </div>
             )}
@@ -1261,7 +1295,7 @@ export const CuentasCorrientesManager: React.FC<CuentasCorrientesManagerProps> =
                 onClick={() => setModalMercadoPago({ isOpen: false, item: null, urlPago: null, cargando: false, error: null })}
                 className="px-4 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-white text-xs font-heading font-bold uppercase transition-colors"
               >
-                Cerrar
+                Cerrar (Sin Cambios)
               </button>
             </div>
           </div>

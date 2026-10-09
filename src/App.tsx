@@ -31,22 +31,34 @@ export default function App() {
         setTurnos(JSON.parse(savedTurnos));
       }
 
-      // Reconciliación automática de retorno desde Mercado Pago para Cuenta Corriente
+      // Reconciliación automática y segura de retorno desde Mercado Pago para Cuenta Corriente
       try {
         const urlParams = new URLSearchParams(window.location.search);
-        const isMPApproved = urlParams.get('status') === 'approved' || urlParams.get('mp_status') === 'approved' || urlParams.get('collection_status') === 'approved';
+        const paymentId = urlParams.get('payment_id') || urlParams.get('collection_id');
+        const collectionStatus = urlParams.get('collection_status') || urlParams.get('status');
         const ccId = urlParams.get('id') || urlParams.get('cc_id');
         const tipoPago = urlParams.get('tipo_pago');
         const montoParam = urlParams.get('monto');
 
-        if (isMPApproved && (tipoPago === 'cuentacorriente' || ccId)) {
-          if (ccId) {
-            const montoNum = Number(montoParam) || 0;
-            gasApi.cobrarCuentaCorriente(ccId, montoNum, 'Mercado Pago (Online)', `MP-ONLINE-${ccId}`)
-              .then(() => {
-                showToast('success', '¡Deuda Cancelada en Mercado Pago!', 'El pago fue procesado con éxito e impactó de forma directa en Contabilidad.');
+        if (tipoPago === 'cuentacorriente' && ccId) {
+          if (collectionStatus === 'approved' && paymentId && paymentId !== 'null') {
+            // Verificar contra la API oficial de Mercado Pago antes de asentar ningún cobro
+            gasApi.verificarPagoMercadoPago({ paymentId, externalReference: ccId })
+              .then((verif) => {
+                if (verif.aprobado) {
+                  const montoNum = Number(montoParam) || Number(verif.monto) || 0;
+                  gasApi.cobrarCuentaCorriente(ccId, montoNum, 'Mercado Pago (Online)', `MP-${verif.paymentId || ccId}`)
+                    .then(() => {
+                      showToast('success', '¡Deuda Cancelada en Mercado Pago!', 'El pago fue verificado con éxito e impactó de forma directa en Contabilidad.');
+                    })
+                    .catch((err) => console.error('Error al asentar cobro retornado:', err));
+                } else {
+                  showToast('warning', 'Pago No Acreditado', 'La ventana de pago en Mercado Pago se cerró o canceló sin abonar. La cuenta corriente sigue pendiente.');
+                }
               })
-              .catch((err) => console.error('Error al asentar cobro retornado:', err));
+              .catch(() => {});
+          } else if (collectionStatus && collectionStatus !== 'approved') {
+            showToast('warning', 'Pago Cancelado', 'No se completó el pago en Mercado Pago. La cuenta corriente continúa pendiente de pago.');
           }
           // Limpiar parámetros de la URL prolijamente
           window.history.replaceState({}, document.title, window.location.pathname);

@@ -126,8 +126,14 @@ export const StockManager = ({
   useEffect(() => {
     cargarListas();
 
-    const handleSync = () => {
+    const handleSync = async () => {
       cargarListas();
+      try {
+        const res = await gasApi.getStockItems();
+        if (res.success && Array.isArray(res.items)) {
+          onStockUpdated(res.items);
+        }
+      } catch {}
     };
 
     window.addEventListener('taller_stock_sync', handleSync);
@@ -214,7 +220,7 @@ export const StockManager = ({
         onShowToast(
           'success',
           'Repuesto Utilizado Registrado',
-          `Se registró ${cant} unid. de "${piezaNombre}" en el historial de consumos. El inventario del Panel 2 se mantiene intacto.`
+          `Se registró ${cant} unid. de "${piezaNombre}" en el historial de consumos y se actualizó el stock físico del inventario.`
         );
         setShowModalUsado(false);
       } else {

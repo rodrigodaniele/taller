@@ -560,8 +560,33 @@ export const gasApi = {
     try {
       const res = await callGasApi({ accion: 'obtenerStock' });
       if (res && res.resultado === 'ok' && Array.isArray(res.items)) {
-        localStorage.setItem('taller_stock_v1', JSON.stringify(res.items));
-        return { success: true, items: res.items };
+        // Preservar deducciones locales recientes si el Google Sheets remoto aún no reflejó el cambio
+        const localSaved = localStorage.getItem('taller_stock_v1');
+        let finalItems = res.items;
+        if (localSaved) {
+          try {
+            const localList: ItemStock[] = JSON.parse(localSaved);
+            finalItems = res.items.map((remoteIt: ItemStock) => {
+              const localIt = localList.find(
+                (l) =>
+                  (l.id && remoteIt.id && l.id === remoteIt.id) ||
+                  l.nombre.trim().toUpperCase() === remoteIt.nombre.trim().toUpperCase()
+              );
+              if (localIt) {
+                return {
+                  ...remoteIt,
+                  // Mantener el stock más bajo (por deducción reciente de turnos/presupuestos) y la mayor rotación
+                  stockActual: Math.min(Number(remoteIt.stockActual) || 0, Number(localIt.stockActual) || 0),
+                  totalInstalados: Math.max(Number(remoteIt.totalInstalados) || 0, Number(localIt.totalInstalados) || 0),
+                  ultimoMovimiento: localIt.ultimoMovimiento || remoteIt.ultimoMovimiento,
+                };
+              }
+              return remoteIt;
+            });
+          } catch {}
+        }
+        localStorage.setItem('taller_stock_v1', JSON.stringify(finalItems));
+        return { success: true, items: finalItems };
       }
     } catch (e) {
       console.warn('Conexión con Sheets para stock no disponible o script previo, leyendo caché local:', e);
@@ -741,33 +766,103 @@ export const gasApi = {
         if (savedStock) {
           const listStock: ItemStock[] = JSON.parse(savedStock);
           let stockModificado = false;
+          const itemsModificados: ItemStock[] = [];
+
+          // Función normalizadora inteligente sin acentos ni signos
+          const normalizar = (s: string) =>
+            (s || '')
+              .normalize('NFD')
+              .replace(/[\u0300-\u036f]/g, '')
+              .toUpperCase()
+              .replace(/[^A-Z0-9\s]/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim();
 
           repuestos.forEach((rep) => {
             const cant = Number(rep.cantidad) || 1;
-            const descNorm = rep.descripcion.trim().toUpperCase();
-            const vehNorm = (vehiculoModelo || '').trim().toUpperCase();
+            const descNorm = normalizar(rep.descripcion);
+            const vehNorm = normalizar(vehiculoModelo || '');
 
-            // Buscar coincidencia por nombre exacto o que contenga la descripción y vehículo
-            const stockItem = listStock.find((x) => {
-              const xNom = x.nombre.trim().toUpperCase();
-              if (xNom === descNorm) return true;
-              if (vehNorm && (xNom.includes(descNorm) && xNom.includes(vehNorm))) return true;
-              if (xNom.includes(descNorm) || descNorm.includes(xNom)) return true;
-              return false;
-            });
+            // Limpieza de palabras de acción ("CAMBIO DE", etc.)
+            const descLimpia = descNorm
+              .replace(/\b(CAMBIO DE|REPARACION DE|COLOCACION DE|INSTALACION DE|JUEGO DE|REVISION DE)\b/g, '')
+              .trim();
 
-            if (stockItem) {
-              if (stockItem.stockActual > 0) {
-                stockItem.stockActual = Math.max(0, stockItem.stockActual - cant);
+            const stopWords = new Set(['DE', 'LA', 'EL', 'DEL', 'LOS', 'LAS', 'PARA', 'EN', 'Y', 'CON', 'UN']);
+            const descTokens = descLimpia.split(' ').filter((w) => w.length > 2 && !stopWords.has(w));
+            const vehTokens = vehNorm.split(' ').filter((w) => w.length > 1 && !stopWords.has(w));
+
+            let mejorItem: ItemStock | undefined;
+            let mejorPuntaje = -1;
+
+            for (const it of listStock) {
+              const itNom = normalizar(it.nombre);
+              const itNomLimpia = itNom
+                .replace(/\b(CAMBIO DE|REPARACION DE|COLOCACION DE|INSTALACION DE|JUEGO DE|REVISION DE)\b/g, '')
+                .trim();
+              const itVeh = normalizar(it.vehiculoCompatibilidad || '');
+
+              let puntaje = 0;
+
+              // 1. Coincidencia directa o substring en nombre limpio
+              if (itNomLimpia === descLimpia || itNom === descNorm) {
+                puntaje += 70;
+              } else if (itNomLimpia.includes(descLimpia) || descLimpia.includes(itNomLimpia)) {
+                puntaje += 50;
               }
-              stockItem.totalInstalados = (Number(stockItem.totalInstalados) || 0) + cant;
-              stockItem.ultimoMovimiento = fechaFinal;
+
+              // 2. Coincidencia de tokens principales (ej: ROTULA, SUSPENSION)
+              let tokensCoincidentes = 0;
+              for (const t of descTokens) {
+                if (itNomLimpia.includes(t)) tokensCoincidentes++;
+              }
+              puntaje += tokensCoincidentes * 20;
+
+              // 3. Compatibilidad de Vehículo
+              if (vehTokens.length > 0) {
+                let vehMatchCount = 0;
+                for (const vt of vehTokens) {
+                  if (itVeh.includes(vt) || itNom.includes(vt)) vehMatchCount++;
+                }
+
+                if (vehMatchCount === vehTokens.length) {
+                  puntaje += 45; // Coincide todo el modelo (ej: PEUGEOT 206)
+                } else if (vehMatchCount > 0) {
+                  puntaje += vehMatchCount * 20;
+                } else if (itVeh && itVeh !== 'MULTIMARCA' && itVeh !== 'UNIVERSAL' && itVeh !== 'TODOS') {
+                  // Penalizar si el repuesto es para otro vehículo distinto
+                  puntaje -= 50;
+                }
+              } else {
+                // Si la descripción misma trae el vehículo (ej: "Rótula Peugeot 206")
+                for (const t of descTokens) {
+                  if (itVeh.includes(t)) puntaje += 25;
+                }
+              }
+
+              if (puntaje > mejorPuntaje && puntaje >= 35) {
+                mejorPuntaje = puntaje;
+                mejorItem = it;
+              }
+            }
+
+            if (mejorItem) {
+              if (mejorItem.stockActual > 0) {
+                mejorItem.stockActual = Math.max(0, mejorItem.stockActual - cant);
+              }
+              mejorItem.totalInstalados = (Number(mejorItem.totalInstalados) || 0) + cant;
+              mejorItem.ultimoMovimiento = fechaFinal;
               stockModificado = true;
+              itemsModificados.push(mejorItem);
             }
           });
 
           if (stockModificado) {
             localStorage.setItem('taller_stock_v1', JSON.stringify(listStock));
+            // Actualizar fila en hoja "Stock" de Google Sheets de manera asíncrona
+            for (const itemMod of itemsModificados) {
+              callGasApi({ accion: 'guardarItemStock', item: itemMod }).catch(() => {});
+            }
           }
         }
       } catch (errStock) {
@@ -842,14 +937,59 @@ export const gasApi = {
       const savedStock = localStorage.getItem('taller_stock_v1');
       const listStock: ItemStock[] = savedStock ? JSON.parse(savedStock) : [];
       const cant = Number(uso.cantidad) || 1;
-      const nomNorm = uso.repuestoNombre.trim().toUpperCase();
 
-      let stockItem = listStock.find(
-        (x) =>
-          x.nombre.trim().toUpperCase() === nomNorm ||
-          nomNorm.includes(x.nombre.trim().toUpperCase()) ||
-          x.nombre.trim().toUpperCase().includes(nomNorm)
-      );
+      const normalizar = (s: string) =>
+        (s || '')
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .toUpperCase()
+          .replace(/[^A-Z0-9\s]/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+      const nomNorm = normalizar(uso.repuestoNombre);
+      const vehNorm = normalizar(uso.vehiculo || '');
+      const nomLimpia = nomNorm
+        .replace(/\b(CAMBIO DE|REPARACION DE|COLOCACION DE|INSTALACION DE|JUEGO DE|REVISION DE)\b/g, '')
+        .trim();
+
+      const stopWords = new Set(['DE', 'LA', 'EL', 'DEL', 'LOS', 'LAS', 'PARA', 'EN', 'Y', 'CON', 'UN']);
+      const descTokens = nomLimpia.split(' ').filter((w) => w.length > 2 && !stopWords.has(w));
+      const vehTokens = vehNorm.split(' ').filter((w) => w.length > 1 && !stopWords.has(w));
+
+      let stockItem: ItemStock | undefined;
+      let mejorPuntaje = -1;
+
+      for (const it of listStock) {
+        const itNom = normalizar(it.nombre);
+        const itNomLimpia = itNom
+          .replace(/\b(CAMBIO DE|REPARACION DE|COLOCACION DE|INSTALACION DE|JUEGO DE|REVISION DE)\b/g, '')
+          .trim();
+        const itVeh = normalizar(it.vehiculoCompatibilidad || '');
+
+        let puntaje = 0;
+        if (itNomLimpia === nomLimpia || itNom === nomNorm) puntaje += 70;
+        else if (itNomLimpia.includes(nomLimpia) || nomLimpia.includes(itNomLimpia)) puntaje += 50;
+
+        for (const t of descTokens) {
+          if (itNomLimpia.includes(t)) puntaje += 20;
+        }
+
+        if (vehTokens.length > 0) {
+          let vehMatch = 0;
+          for (const vt of vehTokens) {
+            if (itVeh.includes(vt) || itNom.includes(vt)) vehMatch++;
+          }
+          if (vehMatch === vehTokens.length) puntaje += 45;
+          else if (vehMatch > 0) puntaje += 20;
+          else if (itVeh && itVeh !== 'MULTIMARCA' && itVeh !== 'UNIVERSAL' && itVeh !== 'TODOS') puntaje -= 50;
+        }
+
+        if (puntaje > mejorPuntaje && puntaje >= 35) {
+          mejorPuntaje = puntaje;
+          stockItem = it;
+        }
+      }
 
       if (stockItem) {
         if (stockItem.stockActual > 0) {
@@ -857,6 +997,7 @@ export const gasApi = {
         }
         stockItem.totalInstalados = (Number(stockItem.totalInstalados) || 0) + cant;
         stockItem.ultimoMovimiento = uso.fecha;
+        callGasApi({ accion: 'guardarItemStock', item: stockItem }).catch(() => {});
       } else {
         // Si no existía en el inventario, agregarlo con stock actual 0
         const nuevoItem: ItemStock = {
@@ -872,6 +1013,7 @@ export const gasApi = {
           ultimoMovimiento: uso.fecha,
         };
         listStock.push(nuevoItem);
+        callGasApi({ accion: 'guardarItemStock', item: nuevoItem }).catch(() => {});
       }
       localStorage.setItem('taller_stock_v1', JSON.stringify(listStock));
 
@@ -1191,7 +1333,7 @@ export const gasApi = {
   },
 
   async crearMovimientoCuentaCorriente(
-    item: Omit<CuentaCorrienteItem, 'id'> & {
+    item: Omit<CuentaCorrienteItem, 'id' | 'montoPagado' | 'saldoPendiente' | 'estado'> & {
       montoPagado?: number;
       saldoPendiente?: number;
       estado?: 'pendiente' | 'parcial' | 'pagado';
@@ -1367,9 +1509,10 @@ export const gasApi = {
 
       const mpToken = "APP_USR-4589130827999167-092812-304c27d1e426c89f133eaac26d1354ed-13866330";
       const origin = typeof window !== 'undefined' ? window.location.origin : 'https://lacasadeladireccion.com';
-      const backSuccess = `${origin}?tipo_pago=cuentacorriente&status=approved&id=${encodeURIComponent(id)}&monto=${encodeURIComponent(saldo)}&patente=${encodeURIComponent(target?.patente || '')}`;
-      const backFailure = `${origin}?tipo_pago=cuentacorriente&status=failed`;
-      const backPending = `${origin}?tipo_pago=cuentacorriente&status=pending`;
+      // Las URLs de retorno no fuerzan status aprobado falso; dejan que Mercado Pago transmita su collection_status real y payment_id
+      const backSuccess = `${origin}?tipo_pago=cuentacorriente&id=${encodeURIComponent(id)}&monto=${encodeURIComponent(saldo)}&patente=${encodeURIComponent(target?.patente || '')}`;
+      const backFailure = `${origin}?tipo_pago=cuentacorriente&id=${encodeURIComponent(id)}&status=failed`;
+      const backPending = `${origin}?tipo_pago=cuentacorriente&id=${encodeURIComponent(id)}&status=pending`;
 
       const mpRes = await fetch('https://api.mercadopago.com/checkout/preferences', {
         method: 'POST',
@@ -1387,6 +1530,7 @@ export const gasApi = {
               unit_price: saldo,
             },
           ],
+          external_reference: String(id),
           back_urls: {
             success: backSuccess,
             failure: backFailure,
@@ -1413,6 +1557,79 @@ export const gasApi = {
       success: false,
       error: 'No se pudo generar el enlace de pago de Mercado Pago. Por favor intentá nuevamente.',
     };
+  },
+
+  /**
+   * Verificar en la API oficial de Mercado Pago si un pago está verdaderamente APROBADO
+   * Evita registrar cobros falsos si el usuario cerró la ventana sin pagar o canceló
+   */
+  async verificarPagoMercadoPago(params: {
+    paymentId?: string;
+    externalReference?: string;
+  }): Promise<{ aprobado: boolean; estado: string; paymentId?: string; monto?: number; error?: string }> {
+    const mpToken = "APP_USR-4589130827999167-092812-304c27d1e426c89f133eaac26d1354ed-13866330";
+    try {
+      // 1. Si tenemos el paymentId exacto devuelto por Mercado Pago
+      if (params.paymentId && params.paymentId !== 'null' && params.paymentId !== 'undefined' && params.paymentId.trim() !== '') {
+        const res = await fetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(params.paymentId.trim())}`, {
+          headers: {
+            'Authorization': `Bearer ${mpToken}`,
+            'Accept': 'application/json',
+          },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const aprobado = data.status === 'approved';
+          return {
+            aprobado,
+            estado: data.status || 'unknown',
+            paymentId: String(data.id),
+            monto: Number(data.transaction_amount) || 0,
+          };
+        }
+      }
+
+      // 2. Si buscamos por external_reference (el ID de cuenta corriente de la orden)
+      if (params.externalReference) {
+        const cleanRef = params.externalReference.trim();
+        const res = await fetch(
+          `https://api.mercadopago.com/v1/payments/search?external_reference=${encodeURIComponent(cleanRef)}&sort=date_created&criteria=desc`,
+          {
+            headers: {
+              'Authorization': `Bearer ${mpToken}`,
+              'Accept': 'application/json',
+            },
+          }
+        );
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.results) && data.results.length > 0) {
+            // Buscar si hay algún pago aprobado para esta referencia
+            const pagoAprobado = data.results.find((p: any) => p.status === 'approved');
+            if (pagoAprobado) {
+              return {
+                aprobado: true,
+                estado: 'approved',
+                paymentId: String(pagoAprobado.id),
+                monto: Number(pagoAprobado.transaction_amount) || 0,
+              };
+            }
+            const ultimoPago = data.results[0];
+            return {
+              aprobado: false,
+              estado: ultimoPago.status || 'pending',
+              paymentId: String(ultimoPago.id),
+              monto: Number(ultimoPago.transaction_amount) || 0,
+            };
+          }
+        }
+      }
+    } catch (e: any) {
+      console.warn('Error al consultar estado de pago en API de Mercado Pago:', e);
+      return { aprobado: false, estado: 'error_conexion', error: e.message };
+    }
+
+    return { aprobado: false, estado: 'no_encontrado' };
   },
 
   async eliminarCuentaCorriente(id: string): Promise<{ success: boolean; error?: string }> {

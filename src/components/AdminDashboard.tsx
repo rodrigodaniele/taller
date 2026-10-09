@@ -786,13 +786,17 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
             precioUnitario: 0,
             subtotal: 0,
           }));
-          gasApi.actualizarRotacionYDescontarStock(
+          const presupuestoAsociado = presupuestos.find(
+            (p) => (p.patente || '').trim().toUpperCase() === selectedTurno.patente.trim().toUpperCase()
+          );
+          const vehiculoDelTurno = presupuestoAsociado?.vehiculoModelo || '';
+          await gasApi.actualizarRotacionYDescontarStock(
             repuestoItems,
-            '',
+            vehiculoDelTurno,
             fechaExactaTrabajo,
             { patente: selectedTurno.patente, clienteNombre: selectedTurno.nombre || selectedTurno.email }
           );
-          fetchStock(true);
+          await fetchStock(true);
         } catch {}
 
         onShowToast(
