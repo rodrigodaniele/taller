@@ -135,6 +135,9 @@ export const PresupuestosManager = ({
   const [showModalForm, setShowModalForm] = useState(false);
   const [presupuestoEnEdicion, setPresupuestoEnEdicion] = useState<Presupuesto | null>(null);
   const [presupuestoParaImprimir, setPresupuestoParaImprimir] = useState<Presupuesto | null>(null);
+  const [presupuestoParaCtaCte, setPresupuestoParaCtaCte] = useState<Presupuesto | null>(null);
+  const [montoEntregaCtaCte, setMontoEntregaCtaCte] = useState<string>('0');
+  const [metodoPagoEntregaCtaCte, setMetodoPagoEntregaCtaCte] = useState<string>('Efectivo');
 
   // Form Fields
   const [clienteNombre, setClienteNombre] = useState('');
@@ -406,7 +409,11 @@ export const PresupuestosManager = ({
   };
 
   // REQUERIMIENTO 2: CUANDO EL ESTADO PASE A FACTURADO, INMEDIATAMENTE DEBE PASAR A LA CONTABILIDAD
-  const cambiarEstado = async (id: string, nuevoEstado: Presupuesto['estado']) => {
+  const cambiarEstado = async (
+    id: string,
+    nuevoEstado: Presupuesto['estado'],
+    opcionesCtaCte?: { entrega?: number; metodoPago?: string }
+  ) => {
     const p = presupuestos.find((x) => x.id === id);
     if (!p) return;
 
@@ -422,17 +429,37 @@ export const PresupuestosManager = ({
       const fechaPresupuesto = normalizarFechaArgentina(p.fecha);
       const cleanPat = (p.patente || '').trim().toUpperCase();
 
-      // 1. Crear el registro en Cuenta Corriente (sin impactar contabilidad)
+      const entrega = Math.max(0, Number(opcionesCtaCte?.entrega) || 0);
+      const montoTotal = Number(p.total) || 0;
+      const entregaReal = Math.min(entrega, montoTotal);
+      const saldoDebiendo = Math.max(0, montoTotal - entregaReal);
+      const metodoPago = opcionesCtaCte?.metodoPago || 'Efectivo';
+
+      // 1. Crear el registro en Cuenta Corriente con el saldo adeudado y el monto entregado registrado
       gasApi.crearMovimientoCuentaCorriente({
         fecha: fechaPresupuesto,
         clienteNombre: p.clienteNombre || 'Cliente Taller',
         clienteEmail: p.clienteEmail || `${cleanPat.toLowerCase()}@cliente.taller`,
         patente: cleanPat,
         concepto: `Presupuesto ${p.numero} - ${p.vehiculoModelo || p.items[0]?.descripcion || 'Trabajo Taller'}`,
-        montoTotal: p.total,
+        montoTotal: montoTotal,
+        montoPagado: entregaReal,
+        saldoPendiente: saldoDebiendo,
+        estado: saldoDebiendo <= 0 ? 'pagado' : entregaReal > 0 ? 'parcial' : 'pendiente',
         presupuestoId: p.id,
-        observaciones: `Adeudado al retirar vehículo ${cleanPat}`,
+        observaciones:
+          entregaReal > 0
+            ? `Seña/Entrega de $${entregaReal.toLocaleString('es-AR')} abonada al retirar (${metodoPago}). Saldo pendiente a cuenta corriente: $${saldoDebiendo.toLocaleString('es-AR')}.`
+            : `Adeudado 100% al retirar vehículo ${cleanPat}`,
+        ultimoPagoFecha: entregaReal > 0 ? fechaPresupuesto : undefined,
+        metodoUltimoPago: entregaReal > 0 ? metodoPago : undefined,
       });
+
+      // Si hubo entrega inicial de dinero, impactar de inmediato en Caja/Contabilidad
+      if (entregaReal > 0) {
+        const conceptoAnticipo = `Entrega a Cta. Cte. ${p.numero} - ${cleanPat} (${p.vehiculoModelo || 'Trabajo taller'})`;
+        onRegistrarIngresoCaja(conceptoAnticipo, entregaReal, cleanPat, fechaPresupuesto, p.id, p.numero);
+      }
 
       // 2. Archivar turno atendido
       try {
@@ -474,11 +501,19 @@ export const PresupuestosManager = ({
         }
       } catch (err) {}
 
-      onShowToast(
-        'warning',
-        '¡Enviado a Cuenta Corriente!',
-        `Vehículo ${p.patente} archivado. Se cargó una deuda de $${p.total.toLocaleString('es-AR')} en su Cuenta Corriente (no ingresa a Caja hasta que el cliente pague).`
-      );
+      if (entregaReal > 0) {
+        onShowToast(
+          'warning',
+          '¡Pase a Cuenta Corriente con Entrega!',
+          `Vehículo ${p.patente} archivado. Ingresaron $${entregaReal.toLocaleString('es-AR')} a Caja y quedaron $${saldoDebiendo.toLocaleString('es-AR')} en deuda de Cuenta Corriente.`
+        );
+      } else {
+        onShowToast(
+          'warning',
+          '¡Enviado a Cuenta Corriente!',
+          `Vehículo ${p.patente} archivado. Se cargó una deuda de $${p.total.toLocaleString('es-AR')} en su Cuenta Corriente (no ingresa a Caja hasta que el cliente pague).`
+        );
+      }
     } else if (nuevoEstado === 'facturado' && estadoAnterior !== 'facturado') {
       const concepto = `Facturación ${p.numero} - ${p.patente} (${p.vehiculoModelo || p.items[0]?.descripcion || 'Trabajos varios'})`;
       const fechaPresupuesto = normalizarFechaArgentina(p.fecha);
@@ -618,12 +653,23 @@ export const PresupuestosManager = ({
     cambiarEstado(p.id, 'facturado');
   };
 
-  // Botón directo Enviar a Cuenta Corriente (Queda debiendo)
+  // Botón directo Enviar a Cuenta Corriente (Queda debiendo con opción de entrega previa)
   const enviarACuentaCorriente = (p: Presupuesto) => {
-    if (!confirm(`¿Enviar presupuesto ${p.numero} ($${p.total.toLocaleString('es-AR')}) a Cuenta Corriente de ${p.patente}?\n\nEl servicio quedará archivado como auto entregado y se creará la deuda en su cuenta corriente (NO entrará dinero a Caja hasta que el cliente pague).`)) {
-      return;
-    }
-    cambiarEstado(p.id, 'a_cuenta_corriente');
+    setPresupuestoParaCtaCte(p);
+    setMontoEntregaCtaCte('0');
+    setMetodoPagoEntregaCtaCte('Efectivo');
+  };
+
+  const confirmarPaseACuentaCorriente = () => {
+    if (!presupuestoParaCtaCte) return;
+    const entrega = Math.max(0, parseFloat(montoEntregaCtaCte) || 0);
+    const total = Number(presupuestoParaCtaCte.total) || 0;
+    const entregaFinal = Math.min(entrega, total);
+    cambiarEstado(presupuestoParaCtaCte.id, 'a_cuenta_corriente', {
+      entrega: entregaFinal,
+      metodoPago: metodoPagoEntregaCtaCte,
+    });
+    setPresupuestoParaCtaCte(null);
   };
 
   // Generate WhatsApp message and open
@@ -1229,7 +1275,14 @@ export const PresupuestosManager = ({
                   <div className="shrink-0 flex flex-col items-end gap-1.5">
                     <select
                       value={p.estado}
-                      onChange={(e) => cambiarEstado(p.id, e.target.value as Presupuesto['estado'])}
+                      onChange={(e) => {
+                        const val = e.target.value as Presupuesto['estado'];
+                        if (val === 'a_cuenta_corriente') {
+                          enviarACuentaCorriente(p);
+                        } else {
+                          cambiarEstado(p.id, val);
+                        }
+                      }}
                       className={`text-[10px] font-heading font-black uppercase tracking-wider px-2.5 py-1.5 rounded border cursor-pointer ${estadoColors}`}
                       title="Cambiar estado del auto y presupuesto. Actualiza el testigo en vivo del cliente al instante."
                     >
@@ -2038,6 +2091,173 @@ export const PresupuestosManager = ({
                   <div className="text-[11px] text-neutral-500">Conformidad del Cliente</div>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: PASAR A CUENTA CORRIENTE (CON OPCIÓN DE ENTREGA PARCIAL / SEÑA) */}
+      {/* ========================================================================= */}
+      {presupuestoParaCtaCte && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-sm animate-in fade-in duration-200 overflow-y-auto">
+          <div className="relative w-full max-w-lg bg-[#0d0d0d] border border-amber-600/70 rounded-2xl shadow-2xl p-5 sm:p-6 my-auto">
+            <button
+              type="button"
+              onClick={() => setPresupuestoParaCtaCte(null)}
+              className="absolute top-4 right-4 text-neutral-400 hover:text-white p-1 rounded-lg hover:bg-neutral-900 transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-amber-950/80 border border-amber-600 flex items-center justify-center text-amber-400 shrink-0">
+                <CreditCard className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base sm:text-lg font-heading font-black text-white uppercase tracking-wide">
+                  Pasar a Cuenta Corriente
+                </h3>
+                <p className="text-xs text-neutral-400">
+                  Presupuesto <span className="text-amber-400 font-bold">{presupuestoParaCtaCte.numero}</span> · Patente <span className="text-white font-mono font-bold">{presupuestoParaCtaCte.patente}</span>
+                </p>
+              </div>
+            </div>
+
+            {/* Resumen del Total */}
+            <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 mb-4">
+              <div className="flex justify-between items-center mb-1">
+                <span className="text-xs text-neutral-400 uppercase tracking-wider font-heading">
+                  Total del Trabajo / Presupuesto:
+                </span>
+                <span className="text-lg font-mono font-black text-white">
+                  ${presupuestoParaCtaCte.total.toLocaleString('es-AR')}
+                </span>
+              </div>
+              <div className="text-[11px] text-neutral-400">
+                Cliente: <strong className="text-neutral-200">{presupuestoParaCtaCte.clienteNombre}</strong> {presupuestoParaCtaCte.vehiculoModelo ? `(${presupuestoParaCtaCte.vehiculoModelo})` : ''}
+              </div>
+            </div>
+
+            {/* Input de Entrega Parcial */}
+            <div className="space-y-4 mb-5">
+              <div>
+                <label className="block text-xs font-heading font-bold text-amber-400 uppercase tracking-wider mb-1.5">
+                  ¿Entregó dinero al retirar el vehículo? (Entrega / Seña)
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 font-mono font-bold text-sm">
+                    $
+                  </span>
+                  <input
+                    type="number"
+                    min="0"
+                    max={presupuestoParaCtaCte.total}
+                    value={montoEntregaCtaCte}
+                    onChange={(e) => setMontoEntregaCtaCte(e.target.value)}
+                    placeholder="0"
+                    className="w-full bg-[#161616] border border-amber-600/50 rounded-xl py-2.5 pl-8 pr-4 text-white text-base font-mono font-bold focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400"
+                  />
+                </div>
+                <p className="text-[11px] text-neutral-400 mt-1">
+                  Si no entregó nada, dejá <strong>$0</strong>. Si pagó una parte (ej. $10.000), ingresala aquí.
+                </p>
+              </div>
+
+              {/* Botones rápidos de cálculo */}
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setMontoEntregaCtaCte('0')}
+                  className="px-2.5 py-1 rounded bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-[11px] text-neutral-300 transition-colors cursor-pointer"
+                >
+                  $0 (Debe todo)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMontoEntregaCtaCte(String(Math.round(presupuestoParaCtaCte.total * 0.5)))}
+                  className="px-2.5 py-1 rounded bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-[11px] text-neutral-300 transition-colors cursor-pointer"
+                >
+                  50% (${Math.round(presupuestoParaCtaCte.total * 0.5).toLocaleString('es-AR')})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMontoEntregaCtaCte(String(Math.round(presupuestoParaCtaCte.total * 0.3)))}
+                  className="px-2.5 py-1 rounded bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-[11px] text-neutral-300 transition-colors cursor-pointer"
+                >
+                  30% (${Math.round(presupuestoParaCtaCte.total * 0.3).toLocaleString('es-AR')})
+                </button>
+              </div>
+
+              {/* Si entregó algo, elegir método de pago de esa entrega */}
+              {Number(montoEntregaCtaCte) > 0 && (
+                <div className="animate-in fade-in duration-150">
+                  <label className="block text-xs font-heading font-bold text-neutral-300 uppercase tracking-wider mb-1">
+                    Método de Pago de la Entrega (Ingresa a Caja)
+                  </label>
+                  <select
+                    value={metodoPagoEntregaCtaCte}
+                    onChange={(e) => setMetodoPagoEntregaCtaCte(e.target.value)}
+                    className="w-full bg-[#161616] border border-neutral-800 rounded-xl px-3 py-2 text-xs text-white"
+                  >
+                    <option value="Efectivo">Efectivo</option>
+                    <option value="Mercado Pago / Transferencia">Mercado Pago / Transferencia</option>
+                    <option value="Tarjeta de Débito">Tarjeta de Débito</option>
+                    <option value="Tarjeta de Crédito">Tarjeta de Crédito</option>
+                  </select>
+                </div>
+              )}
+
+              {/* Desglose en vivo de lo que pasa a Cuenta Corriente */}
+              {(() => {
+                const entregaNum = Math.max(0, parseFloat(montoEntregaCtaCte) || 0);
+                const totalNum = Number(presupuestoParaCtaCte.total) || 0;
+                const entregaReal = Math.min(entregaNum, totalNum);
+                const restaDebiendo = Math.max(0, totalNum - entregaReal);
+
+                return (
+                  <div className="p-3.5 rounded-xl bg-amber-950/30 border border-amber-600/40 space-y-1.5">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-emerald-400 font-bold">
+                        {entregaReal > 0 ? '✓ Ingresa a Caja hoy (Entrega):' : 'Ingresa a Caja hoy:'}
+                      </span>
+                      <strong className="text-emerald-400 font-mono text-sm">
+                        ${entregaReal.toLocaleString('es-AR')}
+                      </strong>
+                    </div>
+                    <div className="flex justify-between text-xs border-t border-amber-600/20 pt-1.5">
+                      <span className="text-amber-300 font-heading font-black uppercase">
+                        💳 Pasa a Cuenta Corriente (Resta que debe):
+                      </span>
+                      <strong className="text-amber-400 font-mono text-base font-black">
+                        ${restaDebiendo.toLocaleString('es-AR')}
+                      </strong>
+                    </div>
+                    <p className="text-[10px] text-neutral-400 mt-1 leading-tight">
+                      El vehículo quedará marcado como retirado y el turno como Atendido.
+                    </p>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Botones de acción */}
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setPresupuestoParaCtaCte(null)}
+                className="flex-1 py-2.5 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-neutral-300 text-xs font-heading font-bold uppercase tracking-wider transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmarPaseACuentaCorriente}
+                className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-heading font-black uppercase tracking-wider transition-all shadow-lg shadow-amber-950 cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Confirmar y Pasar</span>
+              </button>
             </div>
           </div>
         </div>

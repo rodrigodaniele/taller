@@ -2482,6 +2482,28 @@ function registrarRepuestoUsadoSheet(uso) {
     uso.observaciones || ""
   ]);
 
+  // Descontar automáticamente del inventario físico en la hoja Stock si existe la pieza
+  try {
+    var stockSheet = ss.getSheetByName("Stock");
+    if (stockSheet) {
+      var sData = stockSheet.getDataRange().getValues();
+      var nomNorm = nombreUnificado.toUpperCase();
+      for (var s = 1; s < sData.length; s++) {
+        var sNom = String(sData[s][1] || "").trim().toUpperCase();
+        if (sNom && (sNom === nomNorm || nomNorm.indexOf(sNom) !== -1 || sNom.indexOf(nomNorm) !== -1)) {
+          var stockActual = Number(sData[s][4]) || 0;
+          var totalInstalados = Number(sData[s][8]) || 0;
+          var nuevoStock = Math.max(0, stockActual - cant);
+          var nuevosInstalados = totalInstalados + cant;
+          stockSheet.getRange(s + 1, 5).setValue(nuevoStock);
+          stockSheet.getRange(s + 1, 9).setValue(nuevosInstalados);
+          stockSheet.getRange(s + 1, 10).setValue("'" + fechaFmt);
+          break;
+        }
+      }
+    }
+  } catch (errStock) {}
+
   return { resultado: "ok", success: true, id: id };
 }
 

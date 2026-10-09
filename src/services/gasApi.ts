@@ -715,7 +715,7 @@ export const gasApi = {
         const vehTrim = (vehiculoModelo || '').trim();
         const claveUnificada = vehTrim ? `${descTrim} - ${vehTrim}` : descTrim;
 
-        // Agregar exclusivamente al historial de repuestos utilizados (Módulo 1) sin alterar el inventario físico del Panel 2
+        // Agregar al historial de repuestos utilizados (Módulo 1)
         const nuevoUso: RepuestoUsado = {
           id: 'USO-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
           fecha: fechaFinal,
@@ -734,6 +734,45 @@ export const gasApi = {
       });
 
       localStorage.setItem('taller_repuestos_usados_v1', JSON.stringify(listaUsados));
+
+      // Descontar automáticamente del inventario físico (Módulo 2: Stock físico)
+      try {
+        const savedStock = localStorage.getItem('taller_stock_v1');
+        if (savedStock) {
+          const listStock: ItemStock[] = JSON.parse(savedStock);
+          let stockModificado = false;
+
+          repuestos.forEach((rep) => {
+            const cant = Number(rep.cantidad) || 1;
+            const descNorm = rep.descripcion.trim().toUpperCase();
+            const vehNorm = (vehiculoModelo || '').trim().toUpperCase();
+
+            // Buscar coincidencia por nombre exacto o que contenga la descripción y vehículo
+            const stockItem = listStock.find((x) => {
+              const xNom = x.nombre.trim().toUpperCase();
+              if (xNom === descNorm) return true;
+              if (vehNorm && (xNom.includes(descNorm) && xNom.includes(vehNorm))) return true;
+              if (xNom.includes(descNorm) || descNorm.includes(xNom)) return true;
+              return false;
+            });
+
+            if (stockItem) {
+              if (stockItem.stockActual > 0) {
+                stockItem.stockActual = Math.max(0, stockItem.stockActual - cant);
+              }
+              stockItem.totalInstalados = (Number(stockItem.totalInstalados) || 0) + cant;
+              stockItem.ultimoMovimiento = fechaFinal;
+              stockModificado = true;
+            }
+          });
+
+          if (stockModificado) {
+            localStorage.setItem('taller_stock_v1', JSON.stringify(listStock));
+          }
+        }
+      } catch (errStock) {
+        console.warn('Error al descontar stock físico:', errStock);
+      }
 
       // Solo si se solicita explícitamente sincronización remota individual (no cuando ya se envía a Google Apps Script por facturación o turno)
       if (options?.syncWithRemote) {
@@ -1152,16 +1191,29 @@ export const gasApi = {
   },
 
   async crearMovimientoCuentaCorriente(
-    item: Omit<CuentaCorrienteItem, 'id' | 'montoPagado' | 'saldoPendiente' | 'estado'>
+    item: Omit<CuentaCorrienteItem, 'id'> & {
+      montoPagado?: number;
+      saldoPendiente?: number;
+      estado?: 'pendiente' | 'parcial' | 'pagado';
+    }
   ): Promise<{ success: boolean; item: CuentaCorrienteItem; error?: string }> {
     try {
       const id = 'CC-' + Date.now();
+      const montoTotalNum = Number(item.montoTotal) || 0;
+      const montoPagadoNum = Number(item.montoPagado) || 0;
+      const saldoPendienteNum =
+        item.saldoPendiente !== undefined
+          ? Number(item.saldoPendiente)
+          : Math.max(0, montoTotalNum - montoPagadoNum);
+      const estadoCalculado: 'pendiente' | 'parcial' | 'pagado' =
+        item.estado || (saldoPendienteNum <= 0 ? 'pagado' : montoPagadoNum > 0 ? 'parcial' : 'pendiente');
+
       const nuevoItem: CuentaCorrienteItem = {
         ...item,
         id,
-        montoPagado: 0,
-        saldoPendiente: Number(item.montoTotal) || 0,
-        estado: 'pendiente',
+        montoPagado: montoPagadoNum,
+        saldoPendiente: saldoPendienteNum,
+        estado: estadoCalculado,
       };
 
       // 1. Guardar en almacenamiento local
@@ -1183,7 +1235,7 @@ export const gasApi = {
       }
 
       // 3. Guardar en Google Sheets (Hoja Cuentas_Corrientes)
-      // NOTA: NO impacta en Contabilidad porque es una deuda pendiente de cobro.
+      // NOTA: NO impacta en Contabilidad por sí mismo. Si hubo un anticipo pagado, ese anticipo se registra en Contabilidad por separado.
       try {
         await callGasApi({
           accion: 'crearMovimientoCuentaCorriente',
@@ -1196,7 +1248,7 @@ export const gasApi = {
       return { success: true, item: nuevoItem };
     } catch (err: any) {
       console.error('Error al registrar en cuenta corriente:', err);
-      return { success: false, item: { ...item, id: '', montoPagado: 0, saldoPendiente: item.montoTotal, estado: 'pendiente' }, error: err.message };
+      return { success: false, item: { ...item, id: '', montoPagado: item.montoPagado || 0, saldoPendiente: item.saldoPendiente || item.montoTotal, estado: item.estado || 'pendiente' }, error: err.message };
     }
   },
 
