@@ -4,6 +4,7 @@ import { gasApi } from '../services/gasApi';
 import { WORKSHOP_ITEMS, GASTOS_PREDEFINIDOS } from '../constants/workshopItems';
 import { PresupuestosManager } from './PresupuestosManager';
 import { StockManager } from './StockManager';
+import { CuentasCorrientesManager } from './CuentasCorrientesManager';
 import { formatearFechaArgentina, formatearHorario, getFechaHoyArgentina, normalizarFechaArgentina } from '../utils/dateFormatter';
 import {
   ShieldAlert,
@@ -31,7 +32,8 @@ import {
   FileText,
   Package,
   Ban,
-  AlertTriangle
+  AlertTriangle,
+  CreditCard
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -185,7 +187,7 @@ const filtrarTurnosPendientes = (listaTurnos: TurnoAdmin[], listaPresupuestos: P
 };
 
 export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProps) => {
-  const [activeAdminTab, setActiveAdminTab] = useState<'turnos' | 'presupuestos' | 'stock' | 'contabilidad' | 'script'>('turnos');
+  const [activeAdminTab, setActiveAdminTab] = useState<'turnos' | 'presupuestos' | 'stock' | 'contabilidad' | 'cuentas_corrientes' | 'script'>('turnos');
   const [turnoParaPresupuesto, setTurnoParaPresupuesto] = useState<TurnoAdmin | null>(null);
   const [, startTransition] = useTransition();
 
@@ -1791,6 +1793,36 @@ function doPost(e) {
       var resDelCompra = eliminarCompraRepuestoSheet(datos.id);
       return ContentService.createTextOutput(JSON.stringify(resDelCompra)).setMimeType(ContentService.MimeType.JSON);
     }
+
+    // --- ACCIÓN 29: OBTENER CUENTAS CORRIENTES ---
+    if (datos.accion === "obtenerCuentasCorrientes") {
+      var resCC = obtenerCuentasCorrientesSheet();
+      return ContentService.createTextOutput(JSON.stringify(resCC)).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // --- ACCIÓN 30: CREAR MOVIMIENTO CUENTA CORRIENTE (NO IMPACTA CAJA HASTA COBRARSE) ---
+    if (datos.accion === "crearMovimientoCuentaCorriente") {
+      var resCrearCC = crearMovimientoCuentaCorrienteSheet(datos.item);
+      return ContentService.createTextOutput(JSON.stringify(resCrearCC)).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // --- ACCIÓN 31: COBRAR CUENTA CORRIENTE (CON IMPACTO EN CONTABILIDAD) ---
+    if (datos.accion === "cobrarCuentaCorriente") {
+      var resCobrarCC = cobrarCuentaCorrienteSheet(datos.id, datos.montoAbonado, datos.metodoPago, datos.comprobante);
+      return ContentService.createTextOutput(JSON.stringify(resCobrarCC)).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // --- ACCIÓN 32: ELIMINAR CUENTA CORRIENTE (REVIERTE EN CONTABILIDAD) ---
+    if (datos.accion === "eliminarCuentaCorriente") {
+      var resDelCC = eliminarCuentaCorrienteSheet(datos.id);
+      return ContentService.createTextOutput(JSON.stringify(resDelCC)).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // --- ACCIÓN 33: INICIAR PAGO TOTAL MERCADO PAGO CUENTA CORRIENTE ---
+    if (datos.accion === "iniciarPagoMercadoPagoCC") {
+      var resMPCC = iniciarPagoMercadoPagoCCSheet(datos.id);
+      return ContentService.createTextOutput(JSON.stringify(resMPCC)).setMimeType(ContentService.MimeType.JSON);
+    }
                            
   } catch(error) {
     return ContentService.createTextOutput(JSON.stringify({"resultado": "error", "mensaje": error.toString()})).setMimeType(ContentService.MimeType.JSON);
@@ -1904,6 +1936,15 @@ function doGet(e) {
 
     let htmlExito = "<html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'><title>Seña Confirmada</title><style>body{background:#000;color:#fff;font-family:sans-serif;text-align:center;padding:10px;} .card{border:2px solid #e31212;padding:35px 20px;max-width:420px;margin:40px auto;background:#0d0d0d;border-radius:8px;box-shadow:0 4px 15px rgba(227,18,18,0.2);} h1{color:#e31212;margin-top:0;font-size:24px;} .dato{background:#151515;padding:10px;margin:8px 0;border-radius:4px;text-align:left;border:1px solid #222;} .btn{display:inline-block;padding:12px 30px;background:#e31212;color:#fff;text-decoration:none;font-weight:bold;border-radius:4px;margin-top:20px;text-transform:uppercase;font-size:14px;}</style></head><body><div class='card'><h1>¡Seña de Turno Recibida!</h1><p style='color:#aaa;'>Tu pago fue aprobado. Agendamos tu vehículo en el taller con éxito.</p><div class='dato'>🚗 <strong>Patente:</strong> " + params.patente + "</div><div class='dato'>📅 <strong>Día:</strong> " + params.fecha + "</div><div class='dato'>⏰ <strong>Horario:</strong> " + params.horario + " hs</div><a href='#' onclick='window.close();' class='btn'>Finalizar y cerrar</a></div><script>if(window.opener){window.opener.location.reload();}</script></body></html>";
     return HtmlService.createHtmlOutput(htmlExito);
+  }
+
+  // PAGO TOTAL DE CUENTA CORRIENTE POR MERCADO PAGO
+  if (params.tipo_pago === "cuentacorriente" && params.status === "approved") {
+    try {
+      cobrarCuentaCorrienteSheet(params.id, Number(params.monto) || 0, "Mercado Pago Online", "MP-ONLINE-" + params.id);
+    } catch(errCC) {}
+    let htmlExitoCC = "<html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'><title>Deuda Cancelada</title><style>body{background:#000;color:#fff;font-family:sans-serif;text-align:center;padding:10px;} .card{border:2px solid #22c55e;padding:35px 20px;max-width:420px;margin:40px auto;background:#0d0d0d;border-radius:8px;box-shadow:0 4px 15px rgba(34,197,94,0.2);} h1{color:#22c55e;margin-top:0;font-size:24px;} .dato{background:#151515;padding:10px;margin:8px 0;border-radius:4px;text-align:left;border:1px solid #222;} .btn{display:inline-block;padding:12px 30px;background:#22c55e;color:#000;text-decoration:none;font-weight:bold;border-radius:4px;margin-top:20px;text-transform:uppercase;font-size:14px;}</style></head><body><div class='card'><h1>¡Deuda Cancelada con Éxito!</h1><p style='color:#aaa;'>Tu pago total mediante Mercado Pago fue acreditado correctamente.</p><div class='dato'>🚗 <strong>Patente:</strong> " + params.patente + "</div><div class='dato'>💰 <strong>Monto Abonado:</strong> $" + params.monto + "</div><a href='#' onclick='window.close();' class='btn'>Cerrar Ventana</a></div><script>if(window.opener){window.opener.location.reload();}</script></body></html>";
+    return HtmlService.createHtmlOutput(htmlExitoCC);
   }
   
   let htmlFallo = "<html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'><title>Pago Cancelado</title></head><body style='background:#000;color:#fff;text-align:center;font-family:sans-serif;padding:10px;'><div style='border:2px solid #555;padding:35px 20px;max-width:420px;margin:40px auto;background:#0d0d0d;border-radius:8px;'><h1 style='color:#ff3333;margin-top:0;'>Pago no Procesado</h1><p style='color:#aaa;'>No se pudo completar el cobro de la seña del turno. La reserva quedó cancelada y el horario sigue disponible.</p><a href='#' onclick='window.close();' style='color:#fff;font-weight:bold;'>Volver a intentar</a></div></body></html>";
@@ -2883,6 +2924,199 @@ function obtenerHistorialCliente(emailCliente) {
   }
   historialUsuario.reverse();
   return { success: true, historial: historialUsuario };
+}
+
+// --- MÓDULO DE CUENTAS CORRIENTES (HOJA Cuentas_Corrientes) ---
+function obtenerCuentasCorrientesSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Cuentas_Corrientes");
+  if (!sheet) return { resultado: "ok", success: true, items: [] };
+  var data = sheet.getDataRange().getValues();
+  var items = [];
+  for (var i = 1; i < data.length; i++) {
+    if (!data[i][0]) continue;
+    items.push({
+      id: String(data[i][0]),
+      fecha: data[i][1] ? String(data[i][1]).replace(/^'/, "") : "",
+      patente: String(data[i][2] || "").toUpperCase().trim(),
+      clienteNombre: String(data[i][3] || ""),
+      clienteEmail: String(data[i][4] || ""),
+      concepto: String(data[i][5] || ""),
+      montoTotal: Number(data[i][6] || 0),
+      montoPagado: Number(data[i][7] || 0),
+      saldoPendiente: Number(data[i][8] || 0),
+      estado: String(data[i][9] || "pendiente"),
+      observaciones: String(data[i][10] || ""),
+      presupuestoId: String(data[i][11] || ""),
+      ultimoPagoFecha: data[i][12] ? String(data[i][12]).replace(/^'/, "") : "",
+      metodoUltimoPago: String(data[i][13] || "")
+    });
+  }
+  return { resultado: "ok", success: true, items: items };
+}
+
+function crearMovimientoCuentaCorrienteSheet(item) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Cuentas_Corrientes") || ss.insertSheet("Cuentas_Corrientes");
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(["ID", "Fecha", "Patente", "ClienteNombre", "ClienteEmail", "Concepto", "MontoTotal", "MontoPagado", "SaldoPendiente", "Estado", "Observaciones", "PresupuestoID", "UltimoPagoFecha", "MetodoUltimoPago"]);
+  }
+  var id = item.id || ("CC-" + new Date().getTime());
+  var fecha = item.fecha || getFechaHoyArgentinaAppsScript();
+  var pat = String(item.patente || "").toUpperCase().trim();
+  var tot = Number(item.montoTotal) || 0;
+  var pag = Number(item.montoPagado) || 0;
+  var saldo = tot - pag;
+  var est = saldo <= 0 ? "pagado" : (pag > 0 ? "parcial" : "pendiente");
+  
+  sheet.appendRow([
+    id,
+    "'" + fecha,
+    pat,
+    item.clienteNombre || "",
+    item.clienteEmail || "",
+    item.concepto || "",
+    tot,
+    pag,
+    saldo,
+    est,
+    item.observaciones || "",
+    item.presupuestoId || "",
+    "",
+    ""
+  ]);
+  return { resultado: "ok", success: true, id: id };
+}
+
+function cobrarCuentaCorrienteSheet(id, montoAbonado, metodoPago, comprobante) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Cuentas_Corrientes");
+  if (!sheet) return { resultado: "error", success: false, mensaje: "Hoja Cuentas_Corrientes no encontrada" };
+  
+  var data = sheet.getDataRange().getValues();
+  var found = false;
+  var hoy = getFechaHoyArgentinaAppsScript();
+  var patenteItem = "";
+  var conceptoItem = "";
+  var nuevoPag = 0;
+  
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === String(id)) {
+      found = true;
+      patenteItem = String(data[i][2] || "");
+      conceptoItem = String(data[i][5] || "");
+      var tot = Number(data[i][6]) || 0;
+      var pagAntes = Number(data[i][7]) || 0;
+      var abonado = Number(montoAbonado) || 0;
+      nuevoPag = pagAntes + abonado;
+      var nuevoSaldo = Math.max(0, tot - nuevoPag);
+      var nuevoEst = nuevoSaldo <= 0 ? "pagado" : "parcial";
+      
+      sheet.getRange(i + 1, 8).setValue(nuevoPag);
+      sheet.getRange(i + 1, 9).setValue(nuevoSaldo);
+      sheet.getRange(i + 1, 10).setValue(nuevoEst);
+      sheet.getRange(i + 1, 13).setValue("'" + hoy);
+      sheet.getRange(i + 1, 14).setValue(metodoPago || "Efectivo");
+      break;
+    }
+  }
+  
+  if (found) {
+    registrarMovimientoContabilidad({
+      id: "MOV-PAGO-CC-" + id + "-" + (nuevoPag || new Date().getTime()),
+      fecha: hoy,
+      tipo: "ingreso",
+      concepto: "Cobro Cta. Cte.: " + patenteItem + " (" + conceptoItem + ")",
+      categoria: "Cobro Cuenta Corriente",
+      monto: Number(montoAbonado),
+      metodoPago: metodoPago || "Efectivo",
+      referencia: comprobante ? (patenteItem + " (" + comprobante + ") [" + id + "]") : (patenteItem + " [" + id + "]")
+    });
+    return { resultado: "ok", success: true };
+  }
+  return { resultado: "error", success: false, mensaje: "Cuenta Corriente no encontrada" };
+}
+
+function eliminarCuentaCorrienteSheet(id) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Cuentas_Corrientes");
+  if (sheet) {
+    var data = sheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]) === String(id)) {
+        sheet.deleteRow(i + 1);
+        break;
+      }
+    }
+  }
+  
+  var sheetContab = ss.getSheetByName("Contabilidad");
+  if (sheetContab) {
+    var contabData = sheetContab.getDataRange().getValues();
+    var prefijoId = "MOV-PAGO-CC-" + id;
+    for (var j = contabData.length - 1; j >= 1; j--) {
+      var rowId = String(contabData[j][0] || "");
+      var rowRef = String(contabData[j][7] || "");
+      if (rowId === prefijoId || rowId.indexOf(prefijoId) === 0 || rowRef.indexOf(id) !== -1) {
+        sheetContab.deleteRow(j + 1);
+      }
+    }
+  }
+  return { resultado: "ok", success: true };
+}
+
+function iniciarPagoMercadoPagoCCSheet(id) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Cuentas_Corrientes");
+  if (!sheet) return { resultado: "error", mensaje: "Hoja Cuentas_Corrientes no encontrada" };
+  var data = sheet.getDataRange().getValues();
+  var target = null;
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === String(id)) {
+      target = {
+        id: String(data[i][0]),
+        patente: String(data[i][2] || ""),
+        clienteEmail: String(data[i][4] || ""),
+        concepto: String(data[i][5] || ""),
+        saldoPendiente: Number(data[i][8] || 0)
+      };
+      break;
+    }
+  }
+  if (!target || target.saldoPendiente <= 0) {
+    return { resultado: "error", mensaje: "No hay saldo pendiente a pagar para este registro" };
+  }
+
+  var urlScript = ScriptApp.getService().getUrl();
+  var urlMercadoPago = "https://api.mercadopago.com/checkout/preferences";
+  var payload = {
+    items: [{
+      title: "Cancelacion Total Cta Cte - " + target.patente + " (" + target.concepto + ")",
+      quantity: 1,
+      currency_id: "ARS",
+      unit_price: Number(target.saldoPendiente)
+    }],
+    back_urls: {
+      success: urlScript + "?tipo_pago=cuentacorriente&status=approved&id=" + encodeURIComponent(target.id) + "&monto=" + encodeURIComponent(target.saldoPendiente) + "&patente=" + encodeURIComponent(target.patente),
+      failure: urlScript + "?tipo_pago=cuentacorriente&status=failed",
+      pending: urlScript + "?tipo_pago=cuentacorriente&status=pending"
+    },
+    auto_return: "approved"
+  };
+  var opciones = {
+    method: "post",
+    contentType: "application/json",
+    headers: { "Authorization": "Bearer " + MP_ACCESS_TOKEN },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+  var respuesta = UrlFetchApp.fetch(urlMercadoPago, opciones);
+  var jsonRes = JSON.parse(respuesta.getContentText());
+  if (jsonRes.init_point) {
+    return { resultado: "mercadopago", urlPago: jsonRes.init_point };
+  } else {
+    return { resultado: "error", mensaje: jsonRes.message || "Error al conectar con Mercado Pago" };
+  }
 }`;
 
   const copyToClipboard = () => {
@@ -3022,6 +3256,18 @@ function obtenerHistorialCliente(emailCliente) {
           >
             <DollarSign className="w-4 h-4" />
             <span>Caja & Contabilidad del Taller</span>
+          </button>
+
+          <button
+            onClick={() => setActiveAdminTab('cuentas_corrientes')}
+            className={`flex items-center gap-2 px-5 py-3 font-heading font-black text-sm uppercase tracking-wider border-b-2 transition-all cursor-pointer ${
+              activeAdminTab === 'cuentas_corrientes'
+                ? 'border-red-600 text-red-500'
+                : 'border-transparent text-neutral-400 hover:text-white'
+            }`}
+          >
+            <CreditCard className="w-4 h-4" />
+            <span>Cuentas Corrientes</span>
           </button>
 
           <button
@@ -3493,6 +3739,15 @@ function obtenerHistorialCliente(emailCliente) {
               )}
             </div>
           </div>
+        )}
+
+        {/* TAB: CUENTAS CORRIENTES */}
+        {activeAdminTab === 'cuentas_corrientes' && (
+          <CuentasCorrientesManager
+            modoLectura={false}
+            onShowToast={onShowToast}
+            onContabilidadUpdated={fetchContabilidad}
+          />
         )}
 
         {/* TAB 3: SCRIPT DE GOOGLE SHEETS */}

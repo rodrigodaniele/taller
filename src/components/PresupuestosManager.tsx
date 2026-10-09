@@ -20,7 +20,8 @@ import {
   User,
   AlertCircle,
   RefreshCw,
-  MessageCircle
+  MessageCircle,
+  CreditCard
 } from 'lucide-react';
 import { Presupuesto, ItemPresupuesto, TurnoAdmin } from '../types';
 import { WORKSHOP_ITEMS, TRABAJOS_TALLER_SERVICIOS, REPUESTOS_TALLER_PIEZAS } from '../constants/workshopItems';
@@ -417,10 +418,98 @@ export const PresupuestosManager = ({
     );
 
     // Si cambió a facturado y no estaba facturado antes, registrar de inmediato en Contabilidad y en Detalles_Turnos
-    if (nuevoEstado === 'facturado' && estadoAnterior !== 'facturado') {
+    if (nuevoEstado === 'a_cuenta_corriente' && estadoAnterior !== 'a_cuenta_corriente') {
+      const fechaPresupuesto = normalizarFechaArgentina(p.fecha);
+      const cleanPat = (p.patente || '').trim().toUpperCase();
+
+      // 1. Crear el registro en Cuenta Corriente (sin impactar contabilidad)
+      gasApi.crearMovimientoCuentaCorriente({
+        fecha: fechaPresupuesto,
+        clienteNombre: p.clienteNombre || 'Cliente Taller',
+        clienteEmail: p.clienteEmail || `${cleanPat.toLowerCase()}@cliente.taller`,
+        patente: cleanPat,
+        concepto: `Presupuesto ${p.numero} - ${p.vehiculoModelo || p.items[0]?.descripcion || 'Trabajo Taller'}`,
+        montoTotal: p.total,
+        presupuestoId: p.id,
+        observaciones: `Adeudado al retirar vehículo ${cleanPat}`,
+      });
+
+      // 2. Archivar turno atendido
+      try {
+        if (cleanPat) {
+          const saved = localStorage.getItem('taller_turnos_atendidos_v1');
+          const list: string[] = saved ? JSON.parse(saved) : [];
+          if (!list.includes(cleanPat)) {
+            list.push(cleanPat);
+            localStorage.setItem('taller_turnos_atendidos_v1', JSON.stringify(list));
+          }
+          if (typeof BroadcastChannel !== 'undefined') {
+            try {
+              const bc = new BroadcastChannel('lacasadeladireccion_realtime');
+              bc.postMessage({ type: 'TURNO_ATENDIDO', patente: cleanPat });
+              bc.close();
+            } catch {}
+          }
+        }
+      } catch (e) {}
+
+      if (onTurnoAtendido) {
+        onTurnoAtendido(p.patente);
+      }
+
+      try {
+        const pConFechaNormalizada = { ...p, fecha: fechaPresupuesto, estado: 'a_cuenta_corriente' };
+        gasApi.facturarPresupuestoYArchivar(pConFechaNormalizada).catch((err) => console.warn(err));
+        gasApi.marcarTurnoAtendido(p.patente).catch((err) => console.warn(err));
+      } catch (err) {}
+
+      // 3. Descontar repuestos si corresponde
+      try {
+        if (Array.isArray(p.items) && p.items.length > 0) {
+          gasApi.actualizarRotacionYDescontarStock(p.items, p.vehiculoModelo || '', fechaPresupuesto, {
+            patente: p.patente,
+            clienteNombre: p.clienteNombre,
+            presupuestoNumero: p.numero || p.id,
+          });
+        }
+      } catch (err) {}
+
+      onShowToast(
+        'warning',
+        '¡Enviado a Cuenta Corriente!',
+        `Vehículo ${p.patente} archivado. Se cargó una deuda de $${p.total.toLocaleString('es-AR')} en su Cuenta Corriente (no ingresa a Caja hasta que el cliente pague).`
+      );
+    } else if (nuevoEstado === 'facturado' && estadoAnterior !== 'facturado') {
       const concepto = `Facturación ${p.numero} - ${p.patente} (${p.vehiculoModelo || p.items[0]?.descripcion || 'Trabajos varios'})`;
       const fechaPresupuesto = normalizarFechaArgentina(p.fecha);
       onRegistrarIngresoCaja(concepto, p.total, p.patente, fechaPresupuesto, p.id, p.numero);
+
+      // Si venía de cuenta corriente, actualizar la ficha a saldada
+      if (estadoAnterior === 'a_cuenta_corriente') {
+        try {
+          const savedCC = localStorage.getItem('taller_cuentas_corrientes_v1');
+          if (savedCC) {
+            const listCC = JSON.parse(savedCC);
+            const ccMatch = listCC.find(
+              (item: any) =>
+                item.presupuestoId === p.id ||
+                item.presupuestoId === p.numero ||
+                (item.patente === p.patente && item.saldoPendiente > 0)
+            );
+            if (ccMatch) {
+              ccMatch.montoPagado = ccMatch.montoTotal;
+              ccMatch.saldoPendiente = 0;
+              ccMatch.estado = 'pagado';
+              ccMatch.ultimoPagoFecha = getFechaHoyArgentina();
+              ccMatch.metodoUltimoPago = 'Caja de Taller';
+              localStorage.setItem('taller_cuentas_corrientes_v1', JSON.stringify(listCC));
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('taller_cuentacorriente_sync'));
+              }
+            }
+          }
+        } catch {}
+      }
 
       // 1. Guardar en almacenamiento local como turno atendido
       try {
@@ -527,6 +616,14 @@ export const PresupuestosManager = ({
   // Botón directo Cobrar / Pasar a Caja
   const facturarYPasarACaja = (p: Presupuesto) => {
     cambiarEstado(p.id, 'facturado');
+  };
+
+  // Botón directo Enviar a Cuenta Corriente (Queda debiendo)
+  const enviarACuentaCorriente = (p: Presupuesto) => {
+    if (!confirm(`¿Enviar presupuesto ${p.numero} ($${p.total.toLocaleString('es-AR')}) a Cuenta Corriente de ${p.patente}?\n\nEl servicio quedará archivado como auto entregado y se creará la deuda en su cuenta corriente (NO entrará dinero a Caja hasta que el cliente pague).`)) {
+      return;
+    }
+    cambiarEstado(p.id, 'a_cuenta_corriente');
   };
 
   // Generate WhatsApp message and open
@@ -1095,6 +1192,7 @@ export const PresupuestosManager = ({
               en_reparacion: 'bg-orange-950/80 border-orange-600 text-orange-300 font-bold',
               trabajo_terminado: 'bg-emerald-950 border-emerald-500 text-emerald-300 font-black animate-pulse shadow-md shadow-emerald-900/40',
               facturado: 'bg-neutral-900 border-emerald-800/60 text-emerald-400',
+              a_cuenta_corriente: 'bg-amber-950/90 border-amber-500 text-amber-300 font-bold',
               rechazado: 'bg-red-950/60 border-red-800/80 text-red-400',
             }[p.estado] || 'bg-neutral-900 border-neutral-700 text-neutral-300';
 
@@ -1140,7 +1238,8 @@ export const PresupuestosManager = ({
                       <option value="ingreso_taller">🟣 Auto en Taller (Ingresó)</option>
                       <option value="en_reparacion">🟠 Auto en Reparación</option>
                       <option value="trabajo_terminado">🟢 Trabajo Terminado (Listo para Retirar)</option>
-                      <option value="facturado">🏁 Facturado / Entregado (Pasa a Caja)</option>
+                      <option value="facturado">🏁 Facturado / Pagado (Pasa a Caja)</option>
+                      <option value="a_cuenta_corriente">💳 A Cuenta Corriente (Queda Debiendo)</option>
                       <option value="rechazado">⚪ Rechazado / Cancelado</option>
                     </select>
 
@@ -1228,17 +1327,7 @@ export const PresupuestosManager = ({
                       <span className="hidden sm:inline">Editar</span>
                     </button>
 
-                    {p.estado !== 'facturado' ? (
-                      <button
-                        type="button"
-                        onClick={() => facturarYPasarACaja(p)}
-                        title="Facturar e ingresar a Caja de Taller (Contabilidad)"
-                        className="py-2 px-2.5 rounded bg-red-600 hover:bg-red-700 text-white text-xs font-heading font-black flex items-center justify-center gap-1.5 transition-colors shadow-md shadow-red-950 cursor-pointer"
-                      >
-                        <DollarSign className="w-3.5 h-3.5" />
-                        <span className="hidden sm:inline">Cobrar</span>
-                      </button>
-                    ) : (
+                    {p.estado === 'facturado' ? (
                       <button
                         type="button"
                         onClick={() => eliminarPresupuesto(p.id)}
@@ -1247,6 +1336,47 @@ export const PresupuestosManager = ({
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
+                    ) : p.estado === 'a_cuenta_corriente' ? (
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => facturarYPasarACaja(p)}
+                          title="Cobrar en Caja de Taller (Impacta en Contabilidad)"
+                          className="py-2 px-2.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-heading font-black flex items-center justify-center gap-1 transition-colors shadow-md shadow-emerald-950 cursor-pointer"
+                        >
+                          <DollarSign className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">Cobrar Deuda</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => eliminarPresupuesto(p.id)}
+                          title="Eliminar de la lista"
+                          className="py-2 px-2 rounded bg-neutral-950 hover:bg-red-950/50 text-neutral-500 hover:text-red-400 border border-neutral-800 text-xs flex items-center justify-center transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => facturarYPasarACaja(p)}
+                          title="Facturar e ingresar a Caja de Taller (Contabilidad)"
+                          className="py-2 px-2.5 rounded bg-red-600 hover:bg-red-700 text-white text-xs font-heading font-black flex items-center justify-center gap-1 transition-colors shadow-md shadow-red-950 cursor-pointer"
+                        >
+                          <DollarSign className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">Cobrar</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => enviarACuentaCorriente(p)}
+                          title="Cargar a Cuenta Corriente (El cliente se lleva el auto y queda debiendo)"
+                          className="py-2 px-2.5 rounded bg-amber-600 hover:bg-amber-700 text-white text-xs font-heading font-bold flex items-center justify-center gap-1 transition-colors shadow-md shadow-amber-950 cursor-pointer"
+                        >
+                          <CreditCard className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">A Cta. Cte.</span>
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>

@@ -1,4 +1,4 @@
-import { ApiResponse, DatosTrabajoAdmin, TurnoAdmin, Presupuesto, ItemStock, ItemPresupuesto, RepuestoUsado, CompraRepuesto } from '../types';
+import { ApiResponse, DatosTrabajoAdmin, TurnoAdmin, Presupuesto, ItemStock, ItemPresupuesto, RepuestoUsado, CompraRepuesto, CuentaCorrienteItem } from '../types';
 import { getFechaHoyArgentina, normalizarFechaArgentina } from '../utils/dateFormatter';
 
 export const DEFAULT_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbziaELEqc9K1IKN2iXdEZ6bDN-GRUEJUUneEWfGM2VFg60uunAq_vb7gOIsxaDJEL08FA/exec";
@@ -503,6 +503,14 @@ export const gasApi = {
             return true;
           });
           localStorage.setItem('taller_repuestos_usados_v1', JSON.stringify(listUsadosFiltrada));
+        }
+
+        // Eliminar también cuenta corriente vinculada si estaba en cuenta corriente
+        const savedCC = localStorage.getItem('taller_cuentas_corrientes_v1');
+        if (savedCC) {
+          const listCC = JSON.parse(savedCC);
+          const listCCFiltrada = listCC.filter((c: any) => c.presupuestoId !== id && c.presupuestoId !== pTarget?.numero);
+          localStorage.setItem('taller_cuentas_corrientes_v1', JSON.stringify(listCCFiltrada));
         }
       }
 
@@ -1117,6 +1125,218 @@ export const gasApi = {
 
     try {
       return await callGasApi({ accion: 'eliminarCompraRepuesto', id });
+    } catch (e: any) {
+      return { success: true };
+    }
+  },
+
+  // --- MÓDULO DE CUENTAS CORRIENTES ---
+  async getCuentasCorrientes(): Promise<{ success: boolean; items: CuentaCorrienteItem[] }> {
+    try {
+      const res = await callGasApi({ accion: 'obtenerCuentasCorrientes' });
+      if (res && res.resultado === 'ok' && Array.isArray(res.items)) {
+        localStorage.setItem('taller_cuentas_corrientes_v1', JSON.stringify(res.items));
+        return { success: true, items: res.items };
+      }
+    } catch (e) {
+      console.warn('Conexión con Google Sheets para cuentas corrientes no disponible, leyendo caché local:', e);
+    }
+
+    try {
+      const saved = localStorage.getItem('taller_cuentas_corrientes_v1');
+      const items: CuentaCorrienteItem[] = saved ? JSON.parse(saved) : [];
+      return { success: true, items };
+    } catch (e) {
+      return { success: true, items: [] };
+    }
+  },
+
+  async crearMovimientoCuentaCorriente(
+    item: Omit<CuentaCorrienteItem, 'id' | 'montoPagado' | 'saldoPendiente' | 'estado'>
+  ): Promise<{ success: boolean; item: CuentaCorrienteItem; error?: string }> {
+    try {
+      const id = 'CC-' + Date.now();
+      const nuevoItem: CuentaCorrienteItem = {
+        ...item,
+        id,
+        montoPagado: 0,
+        saldoPendiente: Number(item.montoTotal) || 0,
+        estado: 'pendiente',
+      };
+
+      // 1. Guardar en almacenamiento local
+      const saved = localStorage.getItem('taller_cuentas_corrientes_v1');
+      const list: CuentaCorrienteItem[] = saved ? JSON.parse(saved) : [];
+      list.unshift(nuevoItem);
+      localStorage.setItem('taller_cuentas_corrientes_v1', JSON.stringify(list));
+
+      // 2. Notificar sincronización
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('taller_cuentacorriente_sync'));
+        if (typeof BroadcastChannel !== 'undefined') {
+          try {
+            const bc = new BroadcastChannel('lacasadeladireccion_realtime');
+            bc.postMessage({ type: 'CUENTA_CORRIENTE_UPDATED' });
+            bc.close();
+          } catch {}
+        }
+      }
+
+      // 3. Guardar en Google Sheets (Hoja Cuentas_Corrientes)
+      // NOTA: NO impacta en Contabilidad porque es una deuda pendiente de cobro.
+      try {
+        await callGasApi({
+          accion: 'crearMovimientoCuentaCorriente',
+          item: nuevoItem,
+        });
+      } catch (sheetErr) {
+        console.warn('Guardado localmente, pendiente sincronización en Sheets:', sheetErr);
+      }
+
+      return { success: true, item: nuevoItem };
+    } catch (err: any) {
+      console.error('Error al registrar en cuenta corriente:', err);
+      return { success: false, item: { ...item, id: '', montoPagado: 0, saldoPendiente: item.montoTotal, estado: 'pendiente' }, error: err.message };
+    }
+  },
+
+  async cobrarCuentaCorriente(
+    id: string,
+    montoAbonado: number,
+    metodoPago: string = 'Efectivo',
+    comprobante?: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const saved = localStorage.getItem('taller_cuentas_corrientes_v1');
+      const list: CuentaCorrienteItem[] = saved ? JSON.parse(saved) : [];
+      const target = list.find((x) => x.id === id);
+
+      if (target) {
+        const pagadoAntes = Number(target.montoPagado) || 0;
+        const nuevoPagado = pagadoAntes + montoAbonado;
+        const nuevoSaldo = Math.max(0, Number(target.montoTotal) - nuevoPagado);
+        target.montoPagado = nuevoPagado;
+        target.saldoPendiente = nuevoSaldo;
+        target.estado = nuevoSaldo <= 0 ? 'pagado' : 'parcial';
+        target.ultimoPagoFecha = getFechaHoyArgentina();
+        target.metodoUltimoPago = metodoPago;
+
+        localStorage.setItem('taller_cuentas_corrientes_v1', JSON.stringify(list));
+
+        // IMPACTAR EN CONTABILIDAD COMO INGRESO (Cobro de deuda real con ID determinista y único por pago)
+        const pagoIdSufijo = nuevoPagado > 0 ? String(nuevoPagado) : String(Date.now());
+        const movIngreso = {
+          id: `MOV-PAGO-CC-${id}-${pagoIdSufijo}`,
+          fecha: getFechaHoyArgentina(),
+          tipo: 'ingreso' as const,
+          concepto: `Cobro Cta. Cte.: ${target.patente} (${target.concepto || 'Servicio taller'})`,
+          categoria: 'Cobro Cuenta Corriente',
+          monto: Number(montoAbonado),
+          metodoPago: metodoPago || 'Efectivo',
+          referencia: comprobante ? `${target.patente} (${comprobante}) [${id}]` : `${target.patente} [${id}]`,
+        };
+
+        const savedContab = localStorage.getItem('lacasadeladireccion_contabilidad');
+        const listContab = savedContab ? JSON.parse(savedContab) : [];
+        if (!listContab.some((m: any) => m.id === movIngreso.id)) {
+          listContab.unshift(movIngreso);
+          localStorage.setItem('lacasadeladireccion_contabilidad', JSON.stringify(listContab));
+        }
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('taller_cuentacorriente_sync'));
+          window.dispatchEvent(new CustomEvent('taller_contabilidad_sync'));
+          if (typeof BroadcastChannel !== 'undefined') {
+            try {
+              const bc = new BroadcastChannel('lacasadeladireccion_realtime');
+              bc.postMessage({ type: 'CUENTA_CORRIENTE_UPDATED' });
+              bc.postMessage({ type: 'CONTABILIDAD_UPDATED' });
+              bc.close();
+            } catch {}
+          }
+        }
+      }
+
+      // Sincronizar con Google Sheets
+      try {
+        await callGasApi({
+          accion: 'cobrarCuentaCorriente',
+          id,
+          montoAbonado,
+          metodoPago,
+          comprobante,
+        });
+      } catch (e) {
+        console.warn('Aviso: cobro asentado localmente:', e);
+      }
+
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  async pagarCuentaCorrienteMercadoPago(
+    id: string
+  ): Promise<{ success: boolean; urlPago?: string; error?: string }> {
+    try {
+      const res = await callGasApi({
+        accion: 'iniciarPagoMercadoPagoCC',
+        id,
+      });
+      if (res && res.resultado === 'mercadopago' && res.urlPago) {
+        return { success: true, urlPago: res.urlPago };
+      } else if (res && res.urlPago) {
+        return { success: true, urlPago: res.urlPago };
+      }
+      return { success: false, error: res.mensaje || res.error || 'No se pudo generar el enlace de pago de Mercado Pago.' };
+    } catch (e: any) {
+      return { success: false, error: e.message || 'Error de conexión con Mercado Pago.' };
+    }
+  },
+
+  async eliminarCuentaCorriente(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const saved = localStorage.getItem('taller_cuentas_corrientes_v1');
+      if (saved) {
+        const list: CuentaCorrienteItem[] = JSON.parse(saved);
+        const filtered = list.filter((x) => x.id !== id);
+        localStorage.setItem('taller_cuentas_corrientes_v1', JSON.stringify(filtered));
+      }
+
+      // Si había generado un ingreso contable, revertir y eliminar en cascada
+      const savedContab = localStorage.getItem('lacasadeladireccion_contabilidad');
+      if (savedContab) {
+        const contabList = JSON.parse(savedContab);
+        const movIdDirecto = `MOV-PAGO-CC-${id}`;
+        const contabUpdated = contabList.filter((m: any) => {
+          if (!m) return false;
+          const mid = String(m.id || '');
+          if (mid === movIdDirecto || mid.startsWith(movIdDirecto) || mid === id) return false;
+          if (typeof m.referencia === 'string' && m.referencia.includes(id)) return false;
+          return true;
+        });
+        localStorage.setItem('lacasadeladireccion_contabilidad', JSON.stringify(contabUpdated));
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('taller_cuentacorriente_sync'));
+        window.dispatchEvent(new CustomEvent('taller_contabilidad_sync'));
+        if (typeof BroadcastChannel !== 'undefined') {
+          try {
+            const bc = new BroadcastChannel('lacasadeladireccion_realtime');
+            bc.postMessage({ type: 'CUENTA_CORRIENTE_UPDATED' });
+            bc.postMessage({ type: 'CONTABILIDAD_UPDATED' });
+            bc.close();
+          } catch {}
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+
+    try {
+      return await callGasApi({ accion: 'eliminarCuentaCorriente', id });
     } catch (e: any) {
       return { success: true };
     }

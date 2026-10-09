@@ -3,6 +3,7 @@ import { User, Turno, HistorialServicio, Presupuesto } from '../types';
 import { gasApi } from '../services/gasApi';
 import { formatearFechaArgentina, calcularFechaVencimiento, formatearHorario, normalizarFechaArgentina, getFechaHoyArgentina } from '../utils/dateFormatter';
 import { VehicleStatusWitness } from './VehicleStatusWitness';
+import { CuentasCorrientesManager } from './CuentasCorrientesManager';
 import {
   Calendar,
   Clock,
@@ -21,7 +22,8 @@ import {
   RefreshCw,
   X,
   ExternalLink,
-  Check
+  Check,
+  CreditCard
 } from 'lucide-react';
 
 interface ClientDashboardProps {
@@ -38,7 +40,7 @@ export const ClientDashboard = ({
   onShowToast,
 }: ClientDashboardProps) => {
   const [turnos, setTurnos] = useState<Turno[]>(initialTurnos);
-  const [activeTab, setActiveTab] = useState<'turnos' | 'presupuestos' | 'historial'>('turnos');
+  const [activeTab, setActiveTab] = useState<'turnos' | 'presupuestos' | 'historial' | 'cuentas_corrientes'>('turnos');
 
   // New Turno Form State
   const [showBookingForm, setShowBookingForm] = useState(false);
@@ -1031,6 +1033,18 @@ export const ClientDashboard = ({
             <History className="w-4 h-4" />
             <span>Ficha de Servicios Realizados</span>
           </button>
+
+          <button
+            onClick={() => setActiveTab('cuentas_corrientes')}
+            className={`flex items-center gap-2 px-5 py-3 font-heading font-black text-sm uppercase tracking-wider border-b-2 transition-all cursor-pointer ${
+              activeTab === 'cuentas_corrientes'
+                ? 'border-red-600 text-red-500'
+                : 'border-transparent text-neutral-400 hover:text-white'
+            }`}
+          >
+            <CreditCard className="w-4 h-4" />
+            <span>Mi Cuenta Corriente</span>
+          </button>
         </div>
 
         {/* ========================================================================= */}
@@ -1213,6 +1227,10 @@ export const ClientDashboard = ({
                     facturado: {
                       bg: 'bg-neutral-900 border-neutral-700 text-emerald-400',
                       label: '🏁 Trabajo Concluido / Facturado',
+                    },
+                    a_cuenta_corriente: {
+                      bg: 'bg-amber-950/80 border-amber-600 text-amber-300 font-bold',
+                      label: '💳 En Cuenta Corriente (Vehículo Retirado)',
                     },
                     rechazado: {
                       bg: 'bg-neutral-900 border-neutral-700 text-neutral-400',
@@ -1448,6 +1466,18 @@ export const ClientDashboard = ({
             )}
           </div>
         )}
+
+        {/* ========================================================================= */}
+        {/* TAB 4: CUENTA CORRIENTE (SOLO LECTURA + MERCADO PAGO 100% TOTAL) */}
+        {/* ========================================================================= */}
+        {activeTab === 'cuentas_corrientes' && (
+          <CuentasCorrientesManager
+            modoLectura={true}
+            clientEmail={user.email}
+            clientPatentes={turnos.map((t) => t.patente)}
+            onShowToast={onShowToast}
+          />
+        )}
       </div>
 
       {/* ========================================================================= */}
@@ -1503,6 +1533,7 @@ export const ClientDashboard = ({
                       en_reparacion: '🟠 Auto en Reparación (Fosa / Elevador)',
                       trabajo_terminado: '🟢 ¡Trabajo Terminado! Listo para Retirar',
                       facturado: '🏁 Trabajo Concluido / Facturado',
+                      a_cuenta_corriente: '💳 En Cuenta Corriente (Vehículo Retirado)',
                       rechazado: '⚪ Rechazado / Cancelado',
                     }[presupuestoSeleccionadoModal.estado] || presupuestoSeleccionadoModal.estado}
                   </span>

@@ -123,10 +123,28 @@ export interface Presupuesto {
     | 'en_reparacion'
     | 'trabajo_terminado'
     | 'facturado'
+    | 'a_cuenta_corriente'
     | 'rechazado';
   observaciones?: string;
   turnoRef?: string;
   createdAt: string;
+}
+
+export interface CuentaCorrienteItem {
+  id: string;
+  fecha: string;
+  clienteNombre?: string;
+  clienteEmail: string;
+  patente: string;
+  concepto: string;
+  montoTotal: number;
+  montoPagado: number;
+  saldoPendiente: number;
+  estado: 'pendiente' | 'parcial' | 'pagado';
+  presupuestoId?: string;
+  observaciones?: string;
+  ultimoPagoFecha?: string;
+  metodoUltimoPago?: string;
 }
 
 export interface ApiResponse<T = any> {
