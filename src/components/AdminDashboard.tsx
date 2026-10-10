@@ -1461,6 +1461,14 @@ function doPost(e) {
       return ContentService.createTextOutput(JSON.stringify({ resultado: "ok", usuario: clienteEncontrado })).setMimeType(ContentService.MimeType.JSON);
     }
     
+    // --- ACCIÓN: CHAT ASISTENTE VIRTUAL ---
+    if (datos.accion === "chatAsistente") {
+      return ContentService.createTextOutput(JSON.stringify({
+        resultado: "ok",
+        reply: "¡Hola! Bienvenido a La Casa de la Dirección en General Alvear, Mendoza. Somos especialistas en Tren Delantero, Alineación 3D Láser, Balanceo Digital y Frenos. ¿Cómo podemos ayudarte hoy?"
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+    
     // --- ACCIÓN 0: ENVIAR CÓDIGO DE VALIDACIÓN POR CORREO ---
     if (datos.accion === "enviarCodigoVerificacion") {
       var emailDest = datos.email ? datos.email.toString().trim().toLowerCase() : "";
