@@ -85,20 +85,34 @@ export const AiAssistantBubble: React.FC<AiAssistantBubbleProps> = ({ onSchedule
     setInput('');
     setCargando(true);
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
+
     try {
       const response = await fetch('/api/chat-asistente', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
         body: JSON.stringify({
           messages: nuevosMensajes.map((m) => ({
             role: m.role,
             content: m.content,
           })),
         }),
+        signal: controller.signal,
       });
 
+      clearTimeout(timeoutId);
+
       if (!response.ok) {
-        throw new Error('No se pudo obtener respuesta del servidor');
+        let errorDetalle = '';
+        try {
+          const errData = await response.json();
+          errorDetalle = errData.error || errData.details || '';
+        } catch {}
+        throw new Error(errorDetalle || `Error ${response.status}`);
       }
 
       const data = await response.json();
@@ -109,13 +123,14 @@ export const AiAssistantBubble: React.FC<AiAssistantBubbleProps> = ({ onSchedule
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
       setMessages((prev) => [...prev, botMsg]);
-    } catch (error) {
-      console.error('Error al consultar el asistente IA:', error);
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      console.warn('Error al consultar el asistente IA:', error?.message || error);
       const errorMsg: Message = {
         id: 'err-' + Date.now(),
         role: 'assistant',
         content:
-          'Hubo un inconveniente momentáneo de conexión con el asistente. Podés consultar directamente a nuestro WhatsApp oficial o intentar en unos instantes.',
+          'Hubo una interrupción en la conexión con el asistente mecánico. Podés tocar en "Reintentar", consultar directamente por WhatsApp o intentar de nuevo en unos segundos.',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
       setMessages((prev) => [...prev, errorMsg]);
@@ -134,6 +149,14 @@ export const AiAssistantBubble: React.FC<AiAssistantBubbleProps> = ({ onSchedule
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       },
     ]);
+  };
+
+  const handleReintentar = () => {
+    const ultimoUsuario = [...messages].reverse().find((m) => m.role === 'user');
+    if (ultimoUsuario) {
+      setMessages((prev) => prev.filter((m) => !m.id.startsWith('err-')));
+      handleEnviar(ultimoUsuario.content);
+    }
   };
 
   const formatearTexto = (texto: string) => {
@@ -268,7 +291,16 @@ export const AiAssistantBubble: React.FC<AiAssistantBubbleProps> = ({ onSchedule
                     {/* Botones contextuales en mensajes del Asistente */}
                     {isBot && m.id !== 'welcome' && (
                       <div className="mt-3 pt-2.5 border-t border-neutral-800/80 flex flex-wrap gap-2">
-                        {onScheduleClick && (
+                        {m.id.startsWith('err-') && (
+                          <button
+                            onClick={handleReintentar}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-semibold shadow-sm transition-all border border-neutral-700"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5 text-red-400" />
+                            Reintentar Consulta
+                          </button>
+                        )}
+                        {onScheduleClick && !m.id.startsWith('err-') && (
                           <button
                             onClick={() => {
                               setIsOpen(false);
@@ -346,8 +378,8 @@ export const AiAssistantBubble: React.FC<AiAssistantBubbleProps> = ({ onSchedule
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="Describí el ruido o consultá por turnos..."
-                className="flex-1 bg-neutral-950 border border-neutral-800 focus:border-red-500 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white placeholder-neutral-500 outline-none transition-all"
-                disabled={cargando}
+                className="flex-1 bg-neutral-950 border border-neutral-800 focus:border-red-500 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white placeholder-neutral-500 outline-none transition-all disabled:opacity-50"
+                readOnly={cargando}
               />
               <button
                 type="submit"

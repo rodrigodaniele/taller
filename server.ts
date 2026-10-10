@@ -10,7 +10,18 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+const port = 3000;
+
+// Configuración de CORS y cabeceras para máxima compatibilidad con Safari iOS y navegadores móviles
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, X-Requested-With, Origin');
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  next();
+});
 
 app.use(express.json());
 
@@ -70,16 +81,35 @@ app.post('/api/chat-asistente', async (req, res) => {
       parts: [{ text: String(m.content || '') }],
     }));
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents,
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
-        temperature: 0.7,
-      },
-    });
+    let reply = '';
+    const modelsToTry = ['gemini-3.8-flash', 'gemini-flash-latest'];
+    let lastError: any = null;
 
-    const reply = response.text || 'Disculpame, no pude generar una respuesta en este momento. Podés consultarnos directamente por WhatsApp o intentar de nuevo en unos instantes.';
+    for (const modelName of modelsToTry) {
+      try {
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents,
+          config: {
+            systemInstruction: SYSTEM_INSTRUCTION,
+            temperature: 0.7,
+          },
+        });
+        if (response.text) {
+          reply = response.text;
+          break;
+        }
+      } catch (err: any) {
+        console.warn(`Error con modelo ${modelName}, intentando alternativa:`, err?.message || err);
+        lastError = err;
+      }
+    }
+
+    if (!reply) {
+      if (lastError) throw lastError;
+      reply = 'Disculpame, no pude generar una respuesta en este momento. Podés consultarnos directamente por WhatsApp o intentar de nuevo en unos instantes.';
+    }
+
     return res.json({ reply });
   } catch (error: any) {
     console.error('Error en /api/chat-asistente:', error);
