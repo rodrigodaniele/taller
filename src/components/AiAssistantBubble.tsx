@@ -130,8 +130,7 @@ export const AiAssistantBubble: React.FC<AiAssistantBubbleProps> = ({ onSchedule
       const errorMsg: Message = {
         id: 'err-' + Date.now(),
         role: 'assistant',
-        content:
-          'Hubo una interrupción en la conexión con el asistente mecánico. Podés tocar en "Reintentar", consultar directamente por WhatsApp o intentar de nuevo en unos segundos.',
+        content: `Hubo una interrupción en la conexión (${error?.message || 'Error de red'}). Podés tocar en "Reintentar", consultar directamente por WhatsApp o intentar de nuevo en unos segundos.`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
       setMessages((prev) => [...prev, errorMsg]);
@@ -336,7 +335,7 @@ export const AiAssistantBubble: React.FC<AiAssistantBubbleProps> = ({ onSchedule
             {cargando && (
               <div className="flex items-center gap-2 p-3 max-w-[70%] bg-neutral-900/90 border border-neutral-800 rounded-2xl rounded-tl-sm text-neutral-400 text-xs">
                 <div className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
-                <span className="text-neutral-300 font-medium">Analizando síntoma mecánico...</span>
+                <span className="text-neutral-300 font-medium">Analizando...</span>
               </div>
             )}
 
