@@ -10,6 +10,7 @@ import { AdminDashboard } from './components/AdminDashboard';
 import { AuthModal } from './components/AuthModal';
 import { ToastContainer, ToastMessage } from './components/Toast';
 import { Footer } from './components/Footer';
+import { AiAssistantBubble } from './components/AiAssistantBubble';
 import { gasApi, EMAIL_ADMIN_OFICIAL } from './services/gasApi';
 
 export default function App() {
@@ -202,6 +203,10 @@ export default function App() {
         onLoginSuccess={handleLoginSuccess}
         onShowToast={showToast}
       />
+
+      {activeView !== 'admin' && (
+        <AiAssistantBubble onScheduleClick={handleScheduleClick} />
+      )}
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
