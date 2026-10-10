@@ -33,6 +33,22 @@ const PREGUNTAS_RAPIDAS = [
   '📅 ¿Cómo reservo un turno para revisar el auto?'
 ];
 
+// URL pública del backend en Cloud Run para cuando se accede desde casadeladireccion.com.ar u otro hosting externo
+const CLOUD_RUN_API_URL = 'https://ais-dev-jlwvgkpzjprpfz2rpwtia6-149536347367.us-east1.run.app/api/chat-asistente';
+
+const getApiEndpoints = (): string[] => {
+  if (typeof window === 'undefined') return ['/api/chat-asistente', CLOUD_RUN_API_URL];
+  const hostname = window.location.hostname;
+  const isLocalOrRunApp = hostname === 'localhost' || hostname === '127.0.0.1' || hostname.endsWith('.run.app');
+
+  if (isLocalOrRunApp) {
+    // Si estamos directamente en el contenedor de Cloud Run o localhost
+    return ['/api/chat-asistente', CLOUD_RUN_API_URL];
+  }
+  // Si estamos en casadeladireccion.com.ar o cualquier otro dominio personalizado
+  return [CLOUD_RUN_API_URL, '/api/chat-asistente'];
+};
+
 export const AiAssistantBubble: React.FC<AiAssistantBubbleProps> = ({ onScheduleClick }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [showTooltip, setShowTooltip] = useState(true);
@@ -86,41 +102,65 @@ export const AiAssistantBubble: React.FC<AiAssistantBubbleProps> = ({ onSchedule
     setCargando(true);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 25000);
+    const timeoutId = setTimeout(() => controller.abort(), 28000);
 
     try {
-      const response = await fetch('/api/chat-asistente', {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: JSON.stringify({
-          messages: nuevosMensajes.map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
-        }),
-        signal: controller.signal,
-      });
+      const endpoints = getApiEndpoints();
+      let replyText = '';
+      let ultimoError: any = null;
+
+      for (const endpoint of endpoints) {
+        try {
+          const endpointController = new AbortController();
+          const endpointTimer = setTimeout(() => endpointController.abort(), 20000);
+
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: JSON.stringify({
+              messages: nuevosMensajes.map((m) => ({
+                role: m.role,
+                content: m.content,
+              })),
+            }),
+            signal: endpointController.signal,
+          });
+
+          clearTimeout(endpointTimer);
+
+          if (!response.ok) {
+            let errorDetalle = '';
+            try {
+              const errData = await response.json();
+              errorDetalle = errData.error || errData.details || '';
+            } catch {}
+            throw new Error(errorDetalle || `Error HTTP ${response.status}`);
+          }
+
+          const data = await response.json();
+          if (data && data.reply) {
+            replyText = data.reply;
+            break;
+          }
+        } catch (err: any) {
+          console.warn(`Intento fallido con endpoint [${endpoint}]:`, err?.message || err);
+          ultimoError = err;
+        }
+      }
 
       clearTimeout(timeoutId);
 
-      if (!response.ok) {
-        let errorDetalle = '';
-        try {
-          const errData = await response.json();
-          errorDetalle = errData.error || errData.details || '';
-        } catch {}
-        throw new Error(errorDetalle || `Error ${response.status}`);
+      if (!replyText) {
+        throw ultimoError || new Error('No se pudo establecer conexión con el servidor del asistente.');
       }
 
-      const data = await response.json();
       const botMsg: Message = {
         id: 'bot-' + Date.now(),
         role: 'assistant',
-        content: data.reply || 'Disculpame, ocurrió un inconveniente. Por favor intentá de nuevo.',
+        content: replyText,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
       setMessages((prev) => [...prev, botMsg]);

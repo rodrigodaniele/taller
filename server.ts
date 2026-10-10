@@ -12,19 +12,19 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const port = 3000;
 
-// Configuración de CORS y cabeceras para máxima compatibilidad con Safari iOS y navegadores móviles
+// Configuración de CORS y cabeceras para máxima compatibilidad con Safari iOS, Chrome, Android y dominios personalizados (casadeladireccion.com.ar)
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin) {
     res.header('Access-Control-Allow-Origin', origin);
-    res.header('Access-Control-Allow-Credentials', 'true');
   } else {
     res.header('Access-Control-Allow-Origin', '*');
   }
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, X-Requested-With, Origin');
+  res.header('Access-Control-Max-Age', '86400');
   if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    return res.status(204).end();
   }
   next();
 });
@@ -88,7 +88,12 @@ app.post('/api/chat-asistente', async (req, res) => {
     }));
 
     let reply = '';
-    const modelsToTry = ['gemini-3.8-flash', 'gemini-flash-latest'];
+    const modelsToTry = [
+      'gemini-3.1-flash-lite',
+      'gemini-flash-latest',
+      'gemini-2.5-flash',
+      'gemini-3.8-flash',
+    ];
     let lastError: any = null;
 
     for (const modelName of modelsToTry) {
