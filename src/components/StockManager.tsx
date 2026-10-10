@@ -212,17 +212,21 @@ export const StockManager = ({
       });
 
       if (res.success) {
-        // Refrescar lista de stock en memoria
-        const stockActualizado = await gasApi.getStockItems();
-        onStockUpdated(stockActualizado.items);
-        await cargarListas();
+        setShowModalUsado(false);
+        setGuardandoUsado(false);
 
         onShowToast(
           'success',
           'Repuesto Utilizado Registrado',
           `Se registró ${cant} unid. de "${piezaNombre}" en el historial de consumos y se actualizó el stock físico del inventario.`
         );
-        setShowModalUsado(false);
+
+        // Refrescar lista de stock en memoria
+        try {
+          const stockActualizado = await gasApi.getStockItems();
+          onStockUpdated(stockActualizado.items);
+          await cargarListas();
+        } catch {}
       } else {
         onShowToast('error', 'Error al registrar', res.error || 'No se pudo guardar el uso.');
       }

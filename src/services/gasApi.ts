@@ -10,7 +10,9 @@ export const GOOGLE_MAPS_LINK = "https://maps.app.goo.gl/dEzUXy5uZspWS7Tr8";
 /**
  * Performs a POST request to Google Apps Script WebApp
  */
-async function callGasApi<T = any>(payload: Record<string, any>): Promise<T> {
+async function callGasApi<T = any>(payload: Record<string, any>, timeoutMs = 12000): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(DEFAULT_WEBAPP_URL, {
       method: 'POST',
@@ -18,7 +20,9 @@ async function callGasApi<T = any>(payload: Record<string, any>): Promise<T> {
         'Content-Type': 'text/plain;charset=utf-8',
       },
       body: JSON.stringify(payload),
+      signal: controller.signal,
     });
+    clearTimeout(timer);
 
     if (!response.ok) {
       throw new Error(`Error HTTP: ${response.status} ${response.statusText}`);
@@ -27,8 +31,9 @@ async function callGasApi<T = any>(payload: Record<string, any>): Promise<T> {
     const data = await response.json();
     return data;
   } catch (err: any) {
-    console.error('Error al conectar con Google Apps Script:', err);
-    throw new Error(err.message || 'Error de conexión con el servidor de base de datos.');
+    clearTimeout(timer);
+    console.warn('Conexión con Google Apps Script interrumpida o timeout:', err?.message || err);
+    throw new Error(err?.message || 'Error de conexión con el servidor de base de datos.');
   }
 }
 
@@ -1046,25 +1051,26 @@ export const gasApi = {
         }
       }
 
-      // 4. Guardar en Google Sheets (hoja Repuestos_Utilizados indicando no descontar doble)
-      try {
-        await callGasApi({
-          accion: 'registrarRepuestoUsado',
-          uso: { ...nuevoUso, yaDescontadoEnWeb: true, omitirDescuentoStock: true },
-        });
-      } catch (sheetErr) {
-        console.warn('Guardado en caché local, se sincronizará al conectar con Google Sheets:', sheetErr);
-      }
-
-      // 5. Guardar el item de stock actualizado en Google Sheets (hoja Stock) de forma autoritativa
-      // Esto sobreescribe cualquier reducción duplicada que un script anterior de Apps Script pudiera haber intentado hacer.
-      if (stockItem) {
+      // 4. Guardar en Google Sheets en segundo plano para no congelar la interfaz de usuario
+      // Se utiliza una promesa asíncrona desacoplada para garantizar respuesta instantánea en el modal
+      (async () => {
         try {
-          await callGasApi({ accion: 'guardarItemStock', item: stockItem });
-        } catch (errGuardar) {
-          console.warn('No se pudo sincronizar item de stock:', errGuardar);
+          await callGasApi({
+            accion: 'registrarRepuestoUsado',
+            uso: { ...nuevoUso, yaDescontadoEnWeb: true, omitirDescuentoStock: true },
+          }, 15000);
+        } catch (sheetErr) {
+          console.warn('Sync repuesto usado en background:', sheetErr);
         }
-      }
+
+        if (stockItem) {
+          try {
+            await callGasApi({ accion: 'guardarItemStock', item: stockItem }, 15000);
+          } catch (errGuardar) {
+            console.warn('Sync item de stock en background:', errGuardar);
+          }
+        }
+      })();
 
       return { success: true, item: nuevoUso };
     } catch (err: any) {
