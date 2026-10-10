@@ -91,6 +91,7 @@ export const AiAssistantBubble: React.FC<AiAssistantBubbleProps> = ({ onSchedule
     try {
       const response = await fetch('/api/chat-asistente', {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
