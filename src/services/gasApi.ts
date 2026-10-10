@@ -560,12 +560,13 @@ export const gasApi = {
     try {
       const res = await callGasApi({ accion: 'obtenerStock' });
       if (res && res.resultado === 'ok' && Array.isArray(res.items)) {
-        // Preservar deducciones locales recientes si el Google Sheets remoto aún no reflejó el cambio
+        // Preservar cambios locales si fueron realizados hace menos de 20 segundos (mientras Sheets procesa la petición)
         const localSaved = localStorage.getItem('taller_stock_v1');
         let finalItems = res.items;
         if (localSaved) {
           try {
             const localList: ItemStock[] = JSON.parse(localSaved);
+            const now = Date.now();
             finalItems = res.items.map((remoteIt: ItemStock) => {
               const localIt = localList.find(
                 (l) =>
@@ -573,13 +574,17 @@ export const gasApi = {
                   l.nombre.trim().toUpperCase() === remoteIt.nombre.trim().toUpperCase()
               );
               if (localIt) {
-                return {
-                  ...remoteIt,
-                  // Mantener el stock más bajo (por deducción reciente de turnos/presupuestos) y la mayor rotación
-                  stockActual: Math.min(Number(remoteIt.stockActual) || 0, Number(localIt.stockActual) || 0),
-                  totalInstalados: Math.max(Number(remoteIt.totalInstalados) || 0, Number(localIt.totalInstalados) || 0),
-                  ultimoMovimiento: localIt.ultimoMovimiento || remoteIt.ultimoMovimiento,
-                };
+                const pendingTime = (localIt as any)._pendingSyncTime || 0;
+                // Si hubo un cambio local reciente (menos de 25 segundos), respetar el valor local para evitar parpadeos
+                if (now - pendingTime < 25000) {
+                  return {
+                    ...remoteIt,
+                    stockActual: Number(localIt.stockActual),
+                    totalInstalados: Math.max(Number(remoteIt.totalInstalados) || 0, Number(localIt.totalInstalados) || 0),
+                    ultimoMovimiento: localIt.ultimoMovimiento || remoteIt.ultimoMovimiento,
+                    _pendingSyncTime: pendingTime,
+                  };
+                }
               }
               return remoteIt;
             });
@@ -597,19 +602,23 @@ export const gasApi = {
   },
 
   async saveStockItem(item: ItemStock): Promise<{ success: boolean; error?: string }> {
+    const itemConTimestamp = {
+      ...item,
+      _pendingSyncTime: Date.now(),
+    };
     try {
       const saved = localStorage.getItem('taller_stock_v1');
       const list: ItemStock[] = saved ? JSON.parse(saved) : [];
       const idx = list.findIndex((x) => x.id === item.id);
       if (idx >= 0) {
-        list[idx] = item;
+        list[idx] = itemConTimestamp;
       } else {
-        list.push(item);
+        list.push(itemConTimestamp);
       }
       localStorage.setItem('taller_stock_v1', JSON.stringify(list));
 
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('taller_stock_sync', { detail: { item } }));
+        window.dispatchEvent(new CustomEvent('taller_stock_sync', { detail: { item: itemConTimestamp } }));
         if (typeof BroadcastChannel !== 'undefined') {
           try {
             const bc = new BroadcastChannel('lacasadeladireccion_realtime');
@@ -623,7 +632,7 @@ export const gasApi = {
     }
 
     try {
-      return await callGasApi({ accion: 'guardarItemStock', item });
+      return await callGasApi({ accion: 'guardarItemStock', item: itemConTimestamp });
     } catch (e) {
       return { success: true };
     }
@@ -761,12 +770,12 @@ export const gasApi = {
       localStorage.setItem('taller_repuestos_usados_v1', JSON.stringify(listaUsados));
 
       // Descontar automáticamente del inventario físico (Módulo 2: Stock físico)
+      let stockModificado = false;
+      const itemsModificados: ItemStock[] = [];
       try {
         const savedStock = localStorage.getItem('taller_stock_v1');
         if (savedStock) {
           const listStock: ItemStock[] = JSON.parse(savedStock);
-          let stockModificado = false;
-          const itemsModificados: ItemStock[] = [];
 
           // Función normalizadora inteligente sin acentos ni signos
           const normalizar = (s: string) =>
@@ -852,6 +861,7 @@ export const gasApi = {
               }
               mejorItem.totalInstalados = (Number(mejorItem.totalInstalados) || 0) + cant;
               mejorItem.ultimoMovimiento = fechaFinal;
+              (mejorItem as any)._pendingSyncTime = Date.now();
               stockModificado = true;
               itemsModificados.push(mejorItem);
             }
@@ -859,10 +869,6 @@ export const gasApi = {
 
           if (stockModificado) {
             localStorage.setItem('taller_stock_v1', JSON.stringify(listStock));
-            // Actualizar fila en hoja "Stock" de Google Sheets de manera asíncrona
-            for (const itemMod of itemsModificados) {
-              callGasApi({ accion: 'guardarItemStock', item: itemMod }).catch(() => {});
-            }
           }
         }
       } catch (errStock) {
@@ -873,8 +879,18 @@ export const gasApi = {
       if (options?.syncWithRemote) {
         for (const repUso of listaUsados.slice(0, repuestos.length)) {
           try {
-            await callGasApi({ accion: 'registrarRepuestoUsado', uso: repUso });
+            await callGasApi({
+              accion: 'registrarRepuestoUsado',
+              uso: { ...repUso, yaDescontadoEnWeb: true, omitirDescuentoStock: true }
+            });
           } catch {}
+        }
+      }
+
+      // Actualizar filas en hoja "Stock" de Google Sheets de manera autoritativa para reflejar el stock final exacto
+      if (stockModificado && itemsModificados.length > 0) {
+        for (const itemMod of itemsModificados) {
+          callGasApi({ accion: 'guardarItemStock', item: itemMod }).catch(() => {});
         }
       }
 
@@ -997,7 +1013,7 @@ export const gasApi = {
         }
         stockItem.totalInstalados = (Number(stockItem.totalInstalados) || 0) + cant;
         stockItem.ultimoMovimiento = uso.fecha;
-        callGasApi({ accion: 'guardarItemStock', item: stockItem }).catch(() => {});
+        (stockItem as any)._pendingSyncTime = Date.now();
       } else {
         // Si no existía en el inventario, agregarlo con stock actual 0
         const nuevoItem: ItemStock = {
@@ -1012,8 +1028,9 @@ export const gasApi = {
           totalInstalados: cant,
           ultimoMovimiento: uso.fecha,
         };
+        (nuevoItem as any)._pendingSyncTime = Date.now();
         listStock.push(nuevoItem);
-        callGasApi({ accion: 'guardarItemStock', item: nuevoItem }).catch(() => {});
+        stockItem = nuevoItem;
       }
       localStorage.setItem('taller_stock_v1', JSON.stringify(listStock));
 
@@ -1029,11 +1046,24 @@ export const gasApi = {
         }
       }
 
-      // 4. Guardar en Google Sheets (hoja Repuestos_Utilizados y actualizar hoja Stock)
+      // 4. Guardar en Google Sheets (hoja Repuestos_Utilizados indicando no descontar doble)
       try {
-        await callGasApi({ accion: 'registrarRepuestoUsado', uso: nuevoUso });
+        await callGasApi({
+          accion: 'registrarRepuestoUsado',
+          uso: { ...nuevoUso, yaDescontadoEnWeb: true, omitirDescuentoStock: true },
+        });
       } catch (sheetErr) {
         console.warn('Guardado en caché local, se sincronizará al conectar con Google Sheets:', sheetErr);
+      }
+
+      // 5. Guardar el item de stock actualizado en Google Sheets (hoja Stock) de forma autoritativa
+      // Esto sobreescribe cualquier reducción duplicada que un script anterior de Apps Script pudiera haber intentado hacer.
+      if (stockItem) {
+        try {
+          await callGasApi({ accion: 'guardarItemStock', item: stockItem });
+        } catch (errGuardar) {
+          console.warn('No se pudo sincronizar item de stock:', errGuardar);
+        }
       }
 
       return { success: true, item: nuevoUso };
@@ -1068,7 +1098,9 @@ export const gasApi = {
           if (stockItem) {
             stockItem.stockActual = (Number(stockItem.stockActual) || 0) + (Number(target.cantidad) || 1);
             stockItem.totalInstalados = Math.max(0, (Number(stockItem.totalInstalados) || 0) - (Number(target.cantidad) || 1));
+            (stockItem as any)._pendingSyncTime = Date.now();
             localStorage.setItem('taller_stock_v1', JSON.stringify(listStock));
+            callGasApi({ accion: 'guardarItemStock', item: stockItem }).catch(() => {});
           }
         }
 
