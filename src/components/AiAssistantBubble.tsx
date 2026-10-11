@@ -30,7 +30,9 @@ const PREGUNTAS_RAPIDAS = [
   '🚗 Siento un golpe seco al pasar pozos o lomas',
   '🔄 El volante me vibra a más de 80 km/h',
   '🔧 El auto me tira hacia un costado al soltar el volante',
+  '⏱️ ¿Cuánto demoran en alinear y balancear?',
   '💳 ¿Qué formas y medios de pago reciben?',
+  '📋 ¿Hacen chequeo previo para RTO o salir a la ruta?',
   '📅 ¿Cómo reservo un turno para revisar el auto?'
 ];
 
