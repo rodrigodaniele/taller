@@ -637,13 +637,11 @@ export const ClientDashboard = ({
     if (String(t.estado).toLowerCase().trim() !== 'programado') return false;
     const cleanPat = String(t.patente || '').toUpperCase().trim();
     const fechaNorm = normalizarFechaArgentina(t.fecha || '');
+    const horaNorm = String(t.horario || '').trim().replace(/\s+/g, '');
     const hoyStr = getFechaHoyArgentina();
 
-    // Excluir si ya tiene un presupuesto facturado para esa misma fecha (servicio ya concluido y facturado)
-    const estaFacturado = presupuestos.some(
-      (p) => (p.patente || '').toUpperCase().trim() === cleanPat && p.estado === 'facturado' && normalizarFechaArgentina(p.fecha) === fechaNorm
-    );
-    if (estaFacturado) return false;
+    const keyConHora = horaNorm ? `${cleanPat}_${fechaNorm}_${horaNorm}` : '';
+    const keyConFecha = `${cleanPat}_${fechaNorm}`;
 
     // Si es un turno programado para hoy o el futuro, NO ocultarlo por marcas de cancelación viejas
     try {
@@ -651,8 +649,11 @@ export const ClientDashboard = ({
       if (cancelados) {
         const list: string[] = JSON.parse(cancelados);
         const setCancelados = new Set(list.map((x) => x.toUpperCase().trim()));
-        // Solo excluir si está explícitamente cancelada esa fecha específica
-        if (fechaNorm && setCancelados.has(`${cleanPat}_${fechaNorm}`)) {
+        // Solo excluir si está explícitamente cancelado este turno con fecha y hora exacta
+        if (keyConHora && setCancelados.has(keyConHora)) {
+          return false;
+        }
+        if (!keyConHora && fechaNorm && setCancelados.has(keyConFecha)) {
           return false;
         }
         // Si estaba guardada solo la patente sin fecha (legado), solo aplica si el turno es del pasado
@@ -667,7 +668,11 @@ export const ClientDashboard = ({
       if (saved) {
         const list: string[] = JSON.parse(saved);
         const setAtendidos = new Set(list.map((x) => x.toUpperCase().trim()));
-        if (fechaNorm && setAtendidos.has(`${cleanPat}_${fechaNorm}`)) {
+        // Solo excluir si está explícitamente atendido este turno con fecha y hora exacta
+        if (keyConHora && setAtendidos.has(keyConHora)) {
+          return false;
+        }
+        if (!keyConHora && fechaNorm && setAtendidos.has(keyConFecha)) {
           return false;
         }
         if (setAtendidos.has(cleanPat) && fechaNorm < hoyStr) {

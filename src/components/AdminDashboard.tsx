@@ -63,51 +63,81 @@ const getTurnosCanceladosSet = (): Set<string> => {
   return new Set();
 };
 
-const marcarTurnoAtendidoLocal = (patente: string) => {
+const normalizarHoraSimple = (h?: string): string => {
+  if (!h) return '';
+  return h.toString().trim().replace(/\s+/g, '');
+};
+
+const marcarTurnoAtendidoLocal = (patente: string, fecha?: string, horario?: string) => {
   try {
     const clean = patente.toUpperCase().trim();
     if (!clean) return;
     const current = getTurnosAtendidosSet();
-    current.add(clean);
+    const fechaNorm = fecha ? normalizarFechaArgentina(fecha) : '';
+    const horaNorm = normalizarHoraSimple(horario);
+
+    if (fechaNorm && horaNorm) {
+      current.add(`${clean}_${fechaNorm}_${horaNorm}`);
+    } else if (fechaNorm) {
+      current.add(`${clean}_${fechaNorm}`);
+    } else {
+      current.add(clean);
+    }
+
     localStorage.setItem('taller_turnos_atendidos_v1', JSON.stringify(Array.from(current)));
     if (typeof BroadcastChannel !== 'undefined') {
       try {
         const bc = new BroadcastChannel('lacasadeladireccion_realtime');
-        bc.postMessage({ type: 'TURNO_ATENDIDO', patente: clean });
+        bc.postMessage({ type: 'TURNO_ATENDIDO', patente: clean, fecha: fechaNorm, horario: horaNorm });
         bc.close();
       } catch {}
     }
   } catch {}
 };
 
-const marcarTurnoCanceladoLocal = (patente: string, fecha?: string) => {
-  try {
-    const clean = patente.toUpperCase().trim();
-    if (!clean) return;
-    const current = getTurnosCanceladosSet();
-    const key = fecha ? `${clean}_${normalizarFechaArgentina(fecha)}` : clean;
-    current.add(key);
-    localStorage.setItem('taller_turnos_cancelados_v1', JSON.stringify(Array.from(current)));
-    if (typeof BroadcastChannel !== 'undefined') {
-      try {
-        const bc = new BroadcastChannel('lacasadeladireccion_realtime');
-        bc.postMessage({ type: 'TURNO_CANCELADO', patente: clean, fecha: fecha ? normalizarFechaArgentina(fecha) : undefined });
-        bc.close();
-      } catch {}
-    }
-  } catch {}
-};
-
-const removerTurnoCanceladoLocal = (patente: string, fecha?: string) => {
+const marcarTurnoCanceladoLocal = (patente: string, fecha?: string, horario?: string) => {
   try {
     const clean = patente.toUpperCase().trim();
     if (!clean) return;
     const current = getTurnosCanceladosSet();
     const fechaNorm = fecha ? normalizarFechaArgentina(fecha) : '';
+    const horaNorm = normalizarHoraSimple(horario);
+
+    if (fechaNorm && horaNorm) {
+      current.add(`${clean}_${fechaNorm}_${horaNorm}`);
+    } else if (fechaNorm) {
+      current.add(`${clean}_${fechaNorm}`);
+    } else {
+      current.add(clean);
+    }
+
+    localStorage.setItem('taller_turnos_cancelados_v1', JSON.stringify(Array.from(current)));
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        const bc = new BroadcastChannel('lacasadeladireccion_realtime');
+        bc.postMessage({ type: 'TURNO_CANCELADO', patente: clean, fecha: fechaNorm, horario: horaNorm });
+        bc.close();
+      } catch {}
+    }
+  } catch {}
+};
+
+const removerTurnoCanceladoLocal = (patente: string, fecha?: string, horario?: string) => {
+  try {
+    const clean = patente.toUpperCase().trim();
+    if (!clean) return;
+    const current = getTurnosCanceladosSet();
+    const fechaNorm = fecha ? normalizarFechaArgentina(fecha) : '';
+    const horaNorm = normalizarHoraSimple(horario);
     let changed = false;
 
     current.forEach((item) => {
-      if (item === clean || (fechaNorm && item === `${clean}_${fechaNorm}`) || (!fecha && item.startsWith(`${clean}_`))) {
+      if (
+        item === clean ||
+        (fechaNorm && horaNorm && item === `${clean}_${fechaNorm}_${horaNorm}`) ||
+        (fechaNorm && item === `${clean}_${fechaNorm}`) ||
+        (!fecha && item.startsWith(`${clean}_`))
+      ) {
         current.delete(item);
         changed = true;
       }
@@ -120,7 +150,12 @@ const removerTurnoCanceladoLocal = (patente: string, fecha?: string) => {
     const atendidos = getTurnosAtendidosSet();
     let changedAtendidos = false;
     atendidos.forEach((item) => {
-      if (item === clean || (fechaNorm && item === `${clean}_${fechaNorm}`) || (!fecha && item.startsWith(`${clean}_`))) {
+      if (
+        item === clean ||
+        (fechaNorm && horaNorm && item === `${clean}_${fechaNorm}_${horaNorm}`) ||
+        (fechaNorm && item === `${clean}_${fechaNorm}`) ||
+        (!fecha && item.startsWith(`${clean}_`))
+      ) {
         atendidos.delete(item);
         changedAtendidos = true;
       }
@@ -153,6 +188,8 @@ const filtrarTurnosPendientes = (listaTurnos: TurnoAdmin[], listaPresupuestos: P
     const cleanPat = (t.patente || '').toUpperCase().trim();
     if (!cleanPat) return false;
     const fechaNorm = normalizarFechaArgentina(t.fecha);
+    const horaNorm = normalizarHoraSimple(t.horario);
+    const keyConHora = horaNorm ? `${cleanPat}_${fechaNorm}_${horaNorm}` : '';
     const keyConFecha = `${cleanPat}_${fechaNorm}`;
 
     // Si viene explícitamente como cancelado o atendido desde la planilla
@@ -160,13 +197,21 @@ const filtrarTurnosPendientes = (listaTurnos: TurnoAdmin[], listaPresupuestos: P
       return false;
     }
 
-    // Si fue cancelado este turno específico de esta fecha
-    if (canceladosSet.has(keyConFecha)) {
+    // Si fue cancelado este turno específico de esta hora
+    if (keyConHora && canceladosSet.has(keyConHora)) {
+      return false;
+    }
+    // Si no tiene hora y la fecha completa está cancelada
+    if (!keyConHora && canceladosSet.has(keyConFecha)) {
       return false;
     }
 
-    // Si fue atendido este turno específico de esta fecha
-    if (atendidosSet.has(keyConFecha)) {
+    // Si fue atendido este turno específico de esta hora
+    if (keyConHora && atendidosSet.has(keyConHora)) {
+      return false;
+    }
+    // Si no tiene hora y la fecha completa está atendida
+    if (!keyConHora && atendidosSet.has(keyConFecha)) {
       return false;
     }
 
@@ -772,9 +817,19 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
       }
 
       if (res.success) {
-        marcarTurnoAtendidoLocal(selectedTurno.patente);
-        setTurnos((prev) => prev.filter((t) => (t.patente || '').trim().toUpperCase() !== selectedTurno.patente.trim().toUpperCase()));
-        gasApi.marcarTurnoAtendido(selectedTurno.patente).catch(() => {});
+        marcarTurnoAtendidoLocal(selectedTurno.patente, selectedTurno.fecha, selectedTurno.horario);
+        setTurnos((prev) =>
+          prev.filter((t) => {
+            const tPat = (t.patente || '').trim().toUpperCase();
+            const sPat = selectedTurno.patente.trim().toUpperCase();
+            const esMismoTurno =
+              tPat === sPat &&
+              (!selectedTurno.fecha || t.fecha === selectedTurno.fecha) &&
+              (!selectedTurno.horario || t.horario === selectedTurno.horario);
+            return !esMismoTurno;
+          })
+        );
+        gasApi.marcarTurnoAtendido(selectedTurno.patente, selectedTurno.fecha, selectedTurno.horario).catch(() => {});
 
         // Impactar en rotación de stock de repuestos utilizados en el taller con la misma fecha exacta
         try {
@@ -820,11 +875,19 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
   };
 
   // Quitar turno atendido desde presupuestos al facturar
-  const handleTurnoAtendido = (patente: string) => {
+  const handleTurnoAtendido = (patente: string, fecha?: string, horario?: string) => {
     const cleanPat = patente.trim().toUpperCase();
-    marcarTurnoAtendidoLocal(cleanPat);
-    setTurnos((prev) => prev.filter((t) => (t.patente || '').trim().toUpperCase() !== cleanPat));
-    gasApi.marcarTurnoAtendido(cleanPat).catch(() => {});
+    marcarTurnoAtendidoLocal(cleanPat, fecha, horario);
+    setTurnos((prev) =>
+      prev.filter((t) => {
+        const tPat = (t.patente || '').trim().toUpperCase();
+        if (tPat !== cleanPat) return true;
+        if (fecha && t.fecha !== fecha) return true;
+        if (horario && t.horario !== horario) return true;
+        return false;
+      })
+    );
+    gasApi.marcarTurnoAtendido(cleanPat, fecha, horario).catch(() => {});
   };
 
   // Cancelar turno por inasistencia del usuario antes de programar
@@ -832,12 +895,26 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
     if (!turnoACancelar) return;
     const pat = (turnoACancelar.patente || '').trim().toUpperCase();
     const fecha = turnoACancelar.fecha;
+    const horario = turnoACancelar.horario;
     setCancelandoTurno(true);
     try {
-      marcarTurnoCanceladoLocal(pat, fecha);
-      setTurnos((prev) => prev.filter((t) => !( (t.patente || '').trim().toUpperCase() === pat && (!fecha || t.fecha === fecha) )));
-      await gasApi.cancelarTurno(pat, motivoCancelacion, fecha);
-      onShowToast('info', 'Turno cancelado', `El turno de la patente ${pat}${fecha ? ` para el ${fecha}` : ''} fue cancelado.`);
+      marcarTurnoCanceladoLocal(pat, fecha, horario);
+      setTurnos((prev) =>
+        prev.filter((t) => {
+          const tPat = (t.patente || '').trim().toUpperCase();
+          const esMismoTurno =
+            tPat === pat &&
+            (!fecha || t.fecha === fecha) &&
+            (!horario || t.horario === horario);
+          return !esMismoTurno;
+        })
+      );
+      await gasApi.cancelarTurno(pat, motivoCancelacion, fecha, horario);
+      onShowToast(
+        'info',
+        'Turno cancelado',
+        `El turno de la patente ${pat}${fecha ? ` para el ${fecha}` : ''}${horario ? ` (${horario})` : ''} fue cancelado.`
+      );
       setTurnoACancelar(null);
     } catch (err: any) {
       console.error(err);
@@ -1217,8 +1294,8 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
         telefono: cleanTelefono,
         patente: cleanPatente,
       };
-      // Desbloquear cualquier marca previa de cancelación para esta patente y fecha
-      removerTurnoCanceladoLocal(cleanPatente, cleanFecha);
+      // Desbloquear cualquier marca previa de cancelación para esta patente, fecha y horario
+      removerTurnoCanceladoLocal(cleanPatente, cleanFecha, mostradorHorario);
 
       setTodosLosClientes((prev) => {
         const next = [...prev.filter((c) => c.email.toLowerCase().trim() !== cleanEmail), nuevoClienteEnDirectorio];
@@ -1228,7 +1305,12 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
         return next;
       });
 
-      setTurnos((prev) => [nuevoTurnoAdmin, ...prev.filter((t) => t.patente !== cleanPatente || t.fecha !== cleanFecha)]);
+      setTurnos((prev) => [
+        nuevoTurnoAdmin,
+        ...prev.filter(
+          (t) => !(t.patente === cleanPatente && t.fecha === cleanFecha && t.horario === mostradorHorario)
+        ),
+      ]);
 
       onShowToast(
         'success',
@@ -1246,7 +1328,12 @@ export const AdminDashboard = ({ onBackToHome, onShowToast }: AdminDashboardProp
     } catch (err: any) {
       console.warn('Falla en llamada directa a GAS:', err);
       // Fallback local garantizado
-      setTurnos((prev) => [nuevoTurnoAdmin, ...prev.filter((t) => t.patente !== cleanPatente || t.fecha !== cleanFecha)]);
+      setTurnos((prev) => [
+        nuevoTurnoAdmin,
+        ...prev.filter(
+          (t) => !(t.patente === cleanPatente && t.fecha === cleanFecha && t.horario === mostradorHorario)
+        ),
+      ]);
       onShowToast(
         'success',
         'Turno agendado en el sistema',
@@ -1760,13 +1847,13 @@ function doPost(e) {
 
     // --- ACCIÓN 21: MARCAR TURNO COMO ATENDIDO DIRECTAMENTE POR PATENTE ---
     if (datos.accion === "marcarTurnoAtendido") {
-      var resAtendido = pasarTurnoAAtendidoPorPatente(datos.patente);
+      var resAtendido = pasarTurnoAAtendidoPorPatente(datos.patente, datos.fecha, datos.horario);
       return ContentService.createTextOutput(JSON.stringify(resAtendido)).setMimeType(ContentService.MimeType.JSON);
     }
 
     // --- ACCIÓN 22: CANCELAR TURNO POR INASISTENCIA DEL USUARIO ---
     if (datos.accion === "cancelarTurno") {
-      var resCancelado = pasarTurnoACanceladoPorPatente(datos.patente, datos.motivo, datos.fecha);
+      var resCancelado = pasarTurnoACanceladoPorPatente(datos.patente, datos.motivo, datos.fecha, datos.horario);
       return ContentService.createTextOutput(JSON.stringify(resCancelado)).setMimeType(ContentService.MimeType.JSON);
     }
 
@@ -2032,7 +2119,7 @@ function limpiarPatenteParaComparacion(p) {
   return p.toString().replace(/[^a-zA-Z0-9]/g, "").toUpperCase().trim();
 }
 
-function pasarTurnoAAtendidoPorPatente(patente) {
+function pasarTurnoAAtendidoPorPatente(patente, fecha, horario) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheetTurnos = ss.getSheetByName("Turnos");
   if (!sheetTurnos) return { success: false, error: "No se encontró hoja Turnos" };
@@ -2045,13 +2132,33 @@ function pasarTurnoAAtendidoPorPatente(patente) {
   
   var data = sheetTurnos.getDataRange().getValues();
   var actualizados = 0;
+  var fechaTarget = fecha ? formatearFechaParaAppsScript(fecha) : "";
+  var horaTarget = horario ? horario.toString().trim() : "";
   
   for (var i = 1; i < data.length; i++) {
     var patFila = limpiarPatenteParaComparacion(data[i][3]);
     var estFila = data[i][4] ? data[i][4].toString().trim().toLowerCase() : "";
+    var fechaFila = formatearFechaParaAppsScript(data[i][1]);
+    var horaFila = data[i][2] ? formatearHoraParaAppsScript(data[i][2]) : "";
+    
     if (patFila === target && estFila !== "atendido" && estFila !== "cancelado") {
-      sheetTurnos.getRange(i + 1, 5).setValue("Atendido");
-      actualizados++;
+      if (fechaTarget && horaTarget) {
+        if (fechaFila === fechaTarget && horaFila === horaTarget) {
+          sheetTurnos.getRange(i + 1, 5).setValue("Atendido");
+          actualizados++;
+          break; // Atender solo ese turno exacto
+        }
+      } else if (fechaTarget) {
+        if (fechaFila === fechaTarget) {
+          sheetTurnos.getRange(i + 1, 5).setValue("Atendido");
+          actualizados++;
+          break;
+        }
+      } else {
+        sheetTurnos.getRange(i + 1, 5).setValue("Atendido");
+        actualizados++;
+        break;
+      }
     }
   }
   
@@ -2059,7 +2166,7 @@ function pasarTurnoAAtendidoPorPatente(patente) {
   return { success: true, actualizados: actualizados };
 }
 
-function pasarTurnoACanceladoPorPatente(patente, motivo, fecha) {
+function pasarTurnoACanceladoPorPatente(patente, motivo, fecha, horario) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheetTurnos = ss.getSheetByName("Turnos");
   if (!sheetTurnos) return { success: false, error: "No se encontró hoja Turnos" };
@@ -2071,6 +2178,7 @@ function pasarTurnoACanceladoPorPatente(patente, motivo, fecha) {
   if (lastRow <= 1) return { success: true, actualizados: 0 };
   
   var fechaTarget = fecha ? formatearFechaParaAppsScript(fecha) : "";
+  var horaTarget = horario ? horario.toString().trim() : "";
   var hoyStr = getFechaHoyArgentinaAppsScript();
   var data = sheetTurnos.getDataRange().getValues();
   var actualizados = 0;
@@ -2079,20 +2187,28 @@ function pasarTurnoACanceladoPorPatente(patente, motivo, fecha) {
     var patFila = limpiarPatenteParaComparacion(data[i][3]);
     var estFila = data[i][4] ? data[i][4].toString().trim().toLowerCase() : "";
     var fechaFila = formatearFechaParaAppsScript(data[i][1]);
+    var horaFila = data[i][2] ? formatearHoraParaAppsScript(data[i][2]) : "";
     
     if (patFila === target && estFila !== "atendido" && estFila !== "cancelado") {
-      // Si se especificó fecha exacta para cancelar:
-      if (fechaTarget) {
-        if (fechaFila === fechaTarget) {
+      // Si se especificó fecha y hora exacta para cancelar:
+      if (fechaTarget && horaTarget) {
+        if (fechaFila === fechaTarget && horaFila === horaTarget) {
           sheetTurnos.getRange(i + 1, 5).setValue("Cancelado");
           actualizados++;
           break; // Cancelar solo el turno específico seleccionado
+        }
+      } else if (fechaTarget) {
+        if (fechaFila === fechaTarget) {
+          sheetTurnos.getRange(i + 1, 5).setValue("Cancelado");
+          actualizados++;
+          break;
         }
       } else {
         // Si no se envió fecha, cancelar solo si es de hoy o anterior, NUNCA cancelar un turno futuro de mañana
         if (!fechaFila || fechaFila <= hoyStr) {
           sheetTurnos.getRange(i + 1, 5).setValue("Cancelado");
           actualizados++;
+          break;
         }
       }
     }

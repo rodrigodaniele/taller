@@ -222,11 +222,13 @@ export const gasApi = {
     return { success: false, error: 'Usuario no encontrado' };
   },
 
-  async marcarTurnoAtendido(patente: string): Promise<{ success: boolean; error?: string }> {
+  async marcarTurnoAtendido(patente: string, fecha?: string, horario?: string): Promise<{ success: boolean; error?: string }> {
     try {
       return await callGasApi({
         accion: 'marcarTurnoAtendido',
         patente: patente.trim().toUpperCase(),
+        fecha: fecha ? normalizarFechaArgentina(fecha) : undefined,
+        horario: horario ? horario.trim() : undefined,
       });
     } catch (e: any) {
       console.warn('Aviso: Guardado localmente el turno atendido:', e);
@@ -234,17 +236,18 @@ export const gasApi = {
     }
   },
 
-  async cancelarTurno(patente: string, motivo?: string, fecha?: string): Promise<{ success: boolean; error?: string }> {
+  async cancelarTurno(patente: string, motivo?: string, fecha?: string, horario?: string): Promise<{ success: boolean; error?: string }> {
     try {
       const res = await callGasApi({
         accion: 'cancelarTurno',
         patente: patente.trim().toUpperCase(),
         fecha: fecha ? normalizarFechaArgentina(fecha) : undefined,
+        horario: horario ? horario.trim() : undefined,
         motivo: motivo || 'Cliente no asistió',
       });
       // Fallback si la versión instalada en Apps Script aún no tiene la acción 'cancelarTurno'
       if (res && (res as any).resultado === 'error') {
-        return await this.marcarTurnoAtendido(patente);
+        return await this.marcarTurnoAtendido(patente, fecha, horario);
       }
       return res;
     } catch (e: any) {

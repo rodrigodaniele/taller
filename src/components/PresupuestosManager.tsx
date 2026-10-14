@@ -41,7 +41,7 @@ interface PresupuestosManagerProps {
     presupuestoNumero?: string
   ) => void;
   onContabilidadUpdated?: () => void;
-  onTurnoAtendido?: (patente: string) => void;
+  onTurnoAtendido?: (patente: string, fecha?: string, horario?: string) => void;
   onShowToast: (type: 'success' | 'error' | 'warning' | 'info', title: string, desc?: string) => void;
   initialTurnoParaPresupuestar?: TurnoAdmin | null;
   onClearInitialTurno?: () => void;
@@ -461,33 +461,17 @@ export const PresupuestosManager = ({
         onRegistrarIngresoCaja(conceptoAnticipo, entregaReal, cleanPat, fechaPresupuesto, p.id, p.numero);
       }
 
-      // 2. Archivar turno atendido
-      try {
-        if (cleanPat) {
-          const saved = localStorage.getItem('taller_turnos_atendidos_v1');
-          const list: string[] = saved ? JSON.parse(saved) : [];
-          if (!list.includes(cleanPat)) {
-            list.push(cleanPat);
-            localStorage.setItem('taller_turnos_atendidos_v1', JSON.stringify(list));
-          }
-          if (typeof BroadcastChannel !== 'undefined') {
-            try {
-              const bc = new BroadcastChannel('lacasadeladireccion_realtime');
-              bc.postMessage({ type: 'TURNO_ATENDIDO', patente: cleanPat });
-              bc.close();
-            } catch {}
-          }
-        }
-      } catch (e) {}
+      // 2. Archivar turno atendido si existe
+      const turnoAsoc = turnosPendientes.find((tp) => (tp.patente || '').trim().toUpperCase() === cleanPat);
 
       if (onTurnoAtendido) {
-        onTurnoAtendido(p.patente);
+        onTurnoAtendido(p.patente, turnoAsoc?.fecha, turnoAsoc?.horario);
       }
 
       try {
         const pConFechaNormalizada = { ...p, fecha: fechaPresupuesto, estado: 'a_cuenta_corriente' };
         gasApi.facturarPresupuestoYArchivar(pConFechaNormalizada).catch((err) => console.warn(err));
-        gasApi.marcarTurnoAtendido(p.patente).catch((err) => console.warn(err));
+        gasApi.marcarTurnoAtendido(p.patente, turnoAsoc?.fecha, turnoAsoc?.horario).catch((err) => console.warn(err));
       } catch (err) {}
 
       // 3. Descontar repuestos si corresponde
@@ -547,35 +531,19 @@ export const PresupuestosManager = ({
       }
 
       // 1. Guardar en almacenamiento local como turno atendido
-      try {
-        const cleanPat = (p.patente || '').trim().toUpperCase();
-        if (cleanPat) {
-          const saved = localStorage.getItem('taller_turnos_atendidos_v1');
-          const list: string[] = saved ? JSON.parse(saved) : [];
-          if (!list.includes(cleanPat)) {
-            list.push(cleanPat);
-            localStorage.setItem('taller_turnos_atendidos_v1', JSON.stringify(list));
-          }
-          if (typeof BroadcastChannel !== 'undefined') {
-            try {
-              const bc = new BroadcastChannel('lacasadeladireccion_realtime');
-              bc.postMessage({ type: 'TURNO_ATENDIDO', patente: cleanPat });
-              bc.close();
-            } catch {}
-          }
-        }
-      } catch (e) {}
-
       // 2. Quitar el turno de turnos programados pendientes en el AdminDashboard inmediatamente
+      const cleanPat = (p.patente || '').trim().toUpperCase();
+      const turnoAsoc = turnosPendientes.find((tp) => (tp.patente || '').trim().toUpperCase() === cleanPat);
+
       if (onTurnoAtendido) {
-        onTurnoAtendido(p.patente);
+        onTurnoAtendido(p.patente, turnoAsoc?.fecha, turnoAsoc?.horario);
       }
 
       // 3. Registrar automáticamente en la hoja Detalles_Turnos y pasar turno a Atendido en Google Sheets
       try {
         const pConFechaNormalizada = { ...p, fecha: fechaPresupuesto };
         gasApi.facturarPresupuestoYArchivar(pConFechaNormalizada).catch((err) => console.warn(err));
-        gasApi.marcarTurnoAtendido(p.patente).catch((err) => console.warn(err));
+        gasApi.marcarTurnoAtendido(p.patente, turnoAsoc?.fecha, turnoAsoc?.horario).catch((err) => console.warn(err));
       } catch (err) {}
 
       // 4. Actualizar radar de rotación histórica de repuestos, cargar repuestos en Módulo 1 y descontar del inventario físico
